@@ -7,7 +7,7 @@ class Wnacg extends ComicSource {
     // unique id of the source
     key = "wnacg"
 
-    version = "1.0.5"
+    version = "1.0.6"
 
     minAppVersion = "1.0.0"
 
@@ -88,19 +88,24 @@ class Wnacg extends ComicSource {
      * @param showConfirmDialog {boolean}
      */
     async refreshDomains(showConfirmDialog) {
-        let url = "https://wn01.link/"
+        // 发布页本身也会换域名；旧的 wn01.link 已失效，按顺序尝试
+        const publishPages = [
+            "https://wnacg01.link/",
+            "https://wnacg02.link/",
+        ]
         let title = ""
         let message = ""
         let domains = []
+        let seenDomains = new Set()
 
-        try {
-            let res = await fetch(url)
-            if (res.status == 200) {
+        for (let url of publishPages) {
+            try {
+                let res = await fetch(url)
+                if (res.status != 200) continue
                 let html = await res.text()
                 let document = new HtmlDocument(html)
                 // 提取所有链接
                 let links = document.querySelectorAll("a[href]")
-                let seenDomains = new Set()
 
                 for (let link of links) {
                     let href = link.attributes["href"]
@@ -110,12 +115,12 @@ class Wnacg extends ComicSource {
                     let match = href.match(/^https?:\/\/([^\/]+)/)
                     if (match) {
                         let domain = match[1]
-                        // 只提取有效的域名，排除 wn01.link 自身和其他无关链接
+                        // 排除无关链接与发布页自身(wnacg01.link 等)
                         if (domain &&
                             domain.includes(".") &&
-                            !domain.includes("wn01.link") &&
                             !domain.includes("google.cn") &&
                             !domain.includes("cdn-cgi") &&
+                            !/^(wn|wnacg)\d*\.link$/i.test(domain) &&
                             !seenDomains.has(domain)) {
                             domains.push(domain)
                             seenDomains.add(domain)
@@ -124,19 +129,20 @@ class Wnacg extends ComicSource {
                 }
                 document.dispose()
 
-                if (domains.length > 0) {
-                    title = "Update Success"
-                    message = "Fetched: \n\n"
-                }
+                // 抓到就不再试下一个发布页
+                if (domains.length > 0) break
+            } catch (e) {
+                // 换下一个发布页
             }
-        } catch (e) {
-            // 获取失败，使用自定义域名
         }
 
         if (domains.length == 0) {
             title = "Update Failed"
             message = "Using Custom: \n\n"
             domains = Wnacg.domains
+        } else {
+            title = "Update Success"
+            message = "Fetched: \n\n"
         }
 
         for (let i = 0; i < domains.length; i++) {
@@ -787,3 +793,4 @@ class Wnacg extends ComicSource {
         },
     }
 }
+
