@@ -3,7 +3,7 @@ class Picacg extends ComicSource {
 
     key = "picacg"
 
-    version = "1.2.0"
+    version = "1.3.0"
 
     minAppVersion = "1.0.0"
 
@@ -127,21 +127,65 @@ class Picacg extends ComicSource {
         return data.comics.map((c) => this.parseComic(c))
     }
 
-    async _loadLatest(sort) {
-        const data = await this._getData(`comics?page=1&s=${sort ?? 'dd'}`)
+    async _loadLatest() {
+        const data = await this._getData('comics?page=1&s=dd')
         return data.comics.docs.map((c) => this.parseComic(c))
     }
 
-    async _loadCategory(category, sort) {
+    async _loadCategory(category) {
         const data = await this._getData(
-            `comics?page=1&c=${encodeURIComponent(category)}&s=${sort ?? 'dd'}`
+            `comics?page=1&c=${encodeURIComponent(category)}&s=dd`
         )
         return data.comics.docs.map((c) => this.parseComic(c))
+    }
+
+    /**
+     * 按源设置里的"板块顺序"重排板块。
+     * 每项可用板块名/别名/编号(默认顺序的 1 基序号)，
+     * 分隔符支持 , ， 、 ; ； 空格；未列出的板块按默认顺序接在后面。
+     */
+    _orderParts(parts) {
+        const raw = this.loadSetting('boardOrder') || ''
+        const tokens = String(raw)
+            .split(/[,，、;；\s]+/)
+            .map((t) => t.trim())
+            .filter(Boolean)
+        if (tokens.length == 0) return parts
+        const used = new Set()
+        const ordered = []
+        for (const token of tokens) {
+            let index = -1
+            if (/^\d+$/.test(token)) {
+                const i = parseInt(token, 10) - 1
+                if (i >= 0 && i < parts.length && !used.has(i)) index = i
+            } else {
+                const t = token.toLowerCase()
+                index = parts.findIndex(
+                    (p, i) =>
+                        !used.has(i) &&
+                        p.match.some(
+                            (m) =>
+                                m.toLowerCase() === t ||
+                                m.toLowerCase().includes(t) ||
+                                t.includes(m.toLowerCase())
+                        )
+                )
+            }
+            if (index >= 0) {
+                used.add(index)
+                ordered.push(parts[index])
+            }
+        }
+        parts.forEach((p, i) => {
+            if (!used.has(i)) ordered.push(p)
+        })
+        return ordered
     }
 
     explore = [
         {
             // 多板块首页：3 个榜单(全部显示) + 最近更新 + 热门分类(各前 8 部)
+            // 板块先后顺序可在源设置"板块顺序"里改
             title: "Picacg",
 
             // multiPartPage / multiPageComicList / mixed
@@ -152,12 +196,10 @@ class Picacg extends ComicSource {
                     throw 'Not logged in'
                 }
                 const boards = [
-                    ["哔咔日榜", "H24"],
-                    ["哔咔周榜", "D7"],
-                    ["哔咔月榜", "D30"],
+                    { title: "哔咔日榜", alias: ["日榜", "h24"], tt: "H24" },
+                    { title: "哔咔周榜", alias: ["周榜", "d7"], tt: "D7" },
+                    { title: "哔咔月榜", alias: ["月榜", "d30"], tt: "D30" },
                 ]
-                // 排序设置对所有"最新/分类"板块生效(榜单接口不支持排序)
-                const sort = this.loadSetting('sort') || 'dd'
                 const categories = [
                     "大家都在看",
                     "大濕推薦",
@@ -167,49 +209,48 @@ class Picacg extends ComicSource {
                     "Cosplay",
                     "足の恋",
                 ]
-                // 榜单要全部显示，分类只取前 8 部
                 const [leaderboards, latest, categoryLists] = await Promise.all([
-                    Promise.all(boards.map((b) => this._loadLeaderboard(b[1]))),
-                    this._loadLatest(sort),
-                    Promise.all(categories.map((c) => this._loadCategory(c, sort))),
+                    Promise.all(boards.map((b) => this._loadLeaderboard(b.tt))),
+                    this._loadLatest(),
+                    Promise.all(categories.map((c) => this._loadCategory(c))),
                 ])
-                const result = []
+                // 榜单全部显示，分类只取前 8 部
+                const parts = []
                 boards.forEach((b, i) => {
-                    result.push({
-                        title: b[0],
+                    parts.push({
+                        title: b.title,
+                        match: [b.title].concat(b.alias),
                         comics: leaderboards[i],
                         viewMore: {
                             page: "category",
                             attributes: {
-                                category: b[0],
-                                param: `leaderboard:${b[1]}`,
+                                category: b.title,
+                                param: `leaderboard:${b.tt}`,
                             },
                         },
                     })
                 })
-                result.push({
+                parts.push({
                     title: "最近更新",
+                    match: ["最近更新", "最新", "latest"],
                     comics: latest.slice(0, 8),
                     viewMore: {
                         page: "category",
-                        attributes: {
-                            category: "最近更新",
-                            param: "latest",
-                            options: [sort],
-                        },
+                        attributes: { category: "最近更新", param: "latest" },
                     },
                 })
                 categories.forEach((c, i) => {
-                    result.push({
+                    parts.push({
                         title: c,
+                        match: [c],
                         comics: categoryLists[i].slice(0, 8),
                         viewMore: {
                             page: "category",
-                            attributes: { category: c, options: [sort] },
+                            attributes: { category: c },
                         },
                     })
                 })
-                return result
+                return this._orderParts(parts)
             },
         }
     ]
@@ -755,28 +796,11 @@ class Picacg extends ComicSource {
             ],
             default: '3',
         },
-        'sort': {
-            type: 'select',
-            title: 'Sort',
-            options: [
-                {
-                    value: 'dd',
-                    text: 'New to old'
-                },
-                {
-                    value: 'da',
-                    text: 'Old to new'
-                },
-                {
-                    value: 'ld',
-                    text: 'Most likes'
-                },
-                {
-                    value: 'vd',
-                    text: 'Most nominated'
-                },
-            ],
-            default: 'dd',
+        'boardOrder': {
+            type: 'input',
+            title: 'Board order',
+            default: '全彩,Cosplay,大家都在看,大濕推薦,哔咔日榜,哔咔周榜,哔咔月榜,足の恋,官方都在看,嗶咔漢化,最近更新',
+            validator: null,
         },
         'favoriteSort': {
             type: 'select',
@@ -816,6 +840,7 @@ class Picacg extends ComicSource {
             'Tags': "标签",
             'Image quality': "图片质量",
             'App channel': "分流",
+            'Board order': "板块顺序",
             'Favorite sort': "收藏排序",
             'Sort': "排序",
         },
@@ -839,11 +864,13 @@ class Picacg extends ComicSource {
             'Tags': "標籤",
             'Image quality': "圖片質量",
             'App channel': "分流",
+            'Board order': "看板順序",
             'Favorite sort': "收藏排序",
             'Sort': "排序",
         },
     }
 }
+
 
 
 
