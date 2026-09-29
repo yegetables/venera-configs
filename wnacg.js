@@ -7,7 +7,7 @@ class Wnacg extends ComicSource {
     // unique id of the source
     key = "wnacg"
 
-    version = "1.0.10"
+    version = "1.0.11"
 
     minAppVersion = "1.0.0"
 
@@ -15,6 +15,9 @@ class Wnacg extends ComicSource {
     url = "https://cdn.jsdelivr.net/gh/venera-app/venera-configs@main/wnacg.js"
 
     static domains = [];
+
+    // 新结构(多话本)的章节 aid 缓存，供预览用
+    _chapterCache = null;
 
     get baseUrl() {
         let selection = this.loadSetting('domainSelection')
@@ -202,6 +205,57 @@ class Wnacg extends ComicSource {
         }
         document.dispose()
         return comics.slice(0, 8)
+    }
+
+    // 从一个详情页文档里解析章节(只有新结构/多话本才有目录)
+    _chaptersFromDoc(document, id) {
+        const result = []
+        const seen = new Set()
+        for (const link of document.querySelectorAll(
+            `a[href*="photos-slide-aid-"][href*="-sid-${id}.html"]`
+        )) {
+            const m = /photos-slide-aid-(\d+)-sid-/.exec(link.attributes["href"])
+            if (!m || seen.has(m[1])) continue
+            const text = link.text.trim()
+            // 跳过"開始閱讀"按钮(与第一话指向同一页)
+            if (!text || text.indexOf("開始閱讀") >= 0 || text.indexOf("开始阅读") >= 0) continue
+            seen.add(m[1])
+            result.push({ aid: m[1], title: text })
+        }
+        return result
+    }
+
+    // 收集全部章节(目录是分页的: photos-index-aid-<id>-page-<N>.html)
+    // firstDoc 为已解析好的第 1 页文档时直接复用，避免重复请求。
+    async _collectChapters(id, firstDoc) {
+        let doc = firstDoc
+        if (!doc) {
+            const res = await Network.get(`${this.baseUrl}/photos-index-page-1-aid-${id}.html`, {})
+            if (res.status !== 200) return []
+            doc = new HtmlDocument(res.body)
+        }
+        const list = this._chaptersFromDoc(doc, id)
+        // 老结构没有目录，不必再翻页
+        if (list.length === 0) return []
+        for (let p = 2; p <= 20; p++) {
+            let more = []
+            for (const path of [
+                `photos-index-aid-${id}-page-${p}.html`,
+                `photos-index-page-${p}-aid-${id}.html`,
+            ]) {
+                const r = await Network.get(`${this.baseUrl}/${path}`, {})
+                if (r.status !== 200) continue
+                const d = new HtmlDocument(r.body)
+                more = this._chaptersFromDoc(d, id)
+                d.dispose()
+                if (more.length > 0) break
+            }
+            const fresh = more.filter((c) => !list.some((x) => x.aid === c.aid))
+            if (fresh.length === 0) break
+            for (const c of fresh) list.push(c)
+        }
+        this._chapterCache = { id: id, aids: list.map((c) => c.aid) }
+        return list
     }
 
     // 固定板块: 排行榜 + 各分组下的子分类
@@ -805,22 +859,13 @@ class Wnacg extends ComicSource {
             //  新结构(多话本): 详情页给的是"目录"，章节链接指向 photos-slide-aid-<章>-sid-<本>，
             //                 此时 a.tagshow 是章节而不是标签
             //  老结构(单本):   详情页给的是"预览"(div.pic_box.tb)，a.tagshow 才是标签
-            let chapters = new Map()
             let tagsDom = []
             let pages
-            let chapterLinks = document.querySelectorAll(
-                `a[href*="photos-slide-aid-"][href*="-sid-${id}.html"]`
-            )
-            if (chapterLinks.length > 0) {
-                for (const link of chapterLinks) {
-                    let m = /photos-slide-aid-(\d+)-sid-/.exec(link.attributes["href"])
-                    if (!m || chapters.has(m[1])) continue
-                    let text = link.text.trim()
-                    // 跳过"開始閱讀"按钮(与第一话指向同一页)
-                    if (!text || text.indexOf("開始閱讀") >= 0 || text.indexOf("开始阅读") >= 0) continue
-                    chapters.set(m[1], text)
-                }
-                pages = `${chapters.size} 話`
+            let chapters = null
+            if (this._chaptersFromDoc(document, id).length > 0) {
+                const all = await this._collectChapters(id, document)
+                chapters = new Map(all.map((c) => [c.aid, c.title]))
+                pages = `${all.length} 話`
             } else {
                 pages = labels[1].text.split("：")[1]
                 tagsDom = document.querySelectorAll("a.tagshow")
@@ -845,7 +890,7 @@ class Wnacg extends ComicSource {
                 tags: tags,
                 description: description,
                 uploader: uploader,
-                chapters: chapters.size > 0 ? chapters : null,
+                chapters: chapters,
             })
         },
         /**
@@ -855,6 +900,31 @@ class Wnacg extends ComicSource {
          * @returns {Promise<{thumbnails: string[], next: string?}>} - `next` is next page token, null for no more
          */
         loadThumbnails: async (id, next) => {
+            // 新结构(多话本)站点不给预览图，改用每一话的第一张图代替。
+            // 逐话取图比较费请求，所以每页只取 4 话，靠 next 继续翻。
+            let aids = this._chapterCache && this._chapterCache.id === id
+                ? this._chapterCache.aids
+                : (await this._collectChapters(id)).map((c) => c.aid)
+            if (aids.length > 0) {
+                const offset = Number(next || 0)
+                const slice = aids.slice(offset, offset + 4)
+                const thumbs = []
+                for (const aid of slice) {
+                    try {
+                        const res = await Network.get(`${this.baseUrl}/photos-item-aid-${aid}.html`, {})
+                        if (res.status !== 200) continue
+                        const m = /"page_url"\s*:\s*\[([\s\S]*?)\]/.exec(res.body)
+                        if (!m) continue
+                        const first = /"(https?:[^"]+)"/.exec(m[1])
+                        if (first) thumbs.push(first[1].replace(/^http:/, "https:"))
+                    } catch (e) {}
+                }
+                const nextOffset = offset + slice.length
+                return {
+                    thumbnails: thumbs,
+                    next: nextOffset < aids.length ? String(nextOffset) : null
+                }
+            }
             next = next || '1'
             let res = await Network.get(`${this.baseUrl}/photos-index-page-${next}-aid-${id}.html`, {});
             if (res.status !== 200) {
@@ -1042,6 +1112,7 @@ class Wnacg extends ComicSource {
         },
     }
 }
+
 
 
 
