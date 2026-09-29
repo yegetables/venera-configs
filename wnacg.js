@@ -7,7 +7,7 @@ class Wnacg extends ComicSource {
     // unique id of the source
     key = "wnacg"
 
-    version = "1.0.9"
+    version = "1.0.10"
 
     minAppVersion = "1.0.0"
 
@@ -800,16 +800,42 @@ class Wnacg extends ComicSource {
             cover = cover.substring(0, 6) + cover.substring(8)
             let labels = document.querySelectorAll("div.asTBcell.uwconn > label")
             let category = labels[0].text.split("：")[1]
-            let pages = labels[1].text.split("：")[1];
-            let tagsDom = document.querySelectorAll("a.tagshow");
+
+            // 站点现在有两套详情页结构：
+            //  新结构(多话本): 详情页给的是"目录"，章节链接指向 photos-slide-aid-<章>-sid-<本>，
+            //                 此时 a.tagshow 是章节而不是标签
+            //  老结构(单本):   详情页给的是"预览"(div.pic_box.tb)，a.tagshow 才是标签
+            let chapters = new Map()
+            let tagsDom = []
+            let pages
+            let chapterLinks = document.querySelectorAll(
+                `a[href*="photos-slide-aid-"][href*="-sid-${id}.html"]`
+            )
+            if (chapterLinks.length > 0) {
+                for (const link of chapterLinks) {
+                    let m = /photos-slide-aid-(\d+)-sid-/.exec(link.attributes["href"])
+                    if (!m || chapters.has(m[1])) continue
+                    let text = link.text.trim()
+                    // 跳过"開始閱讀"按钮(与第一话指向同一页)
+                    if (!text || text.indexOf("開始閱讀") >= 0 || text.indexOf("开始阅读") >= 0) continue
+                    chapters.set(m[1], text)
+                }
+                pages = `${chapters.size} 話`
+            } else {
+                pages = labels[1].text.split("：")[1]
+                tagsDom = document.querySelectorAll("a.tagshow")
+            }
+
             let tags = new Map()
-            tags.set("頁數", [pages])
             tags.set("分類", [category])
+            tags.set(chapters.size > 0 ? "章節" : "頁數", [pages])
             if (tagsDom.length > 0) {
                 tags.set("標籤", tagsDom.map((e) => e.text))
             }
-            let description = document.querySelector("div.asTBcell.uwconn > p").text;
-            let uploader = document.querySelector("div.asTBcell.uwuinfo > a > p").text;
+            let descDom = document.querySelector("div.asTBcell.uwconn > p")
+            let description = descDom ? descDom.text : ""
+            let upDom = document.querySelector("div.asTBcell.uwuinfo > a > p")
+            let uploader = upDom ? upDom.text : ""
 
             return new ComicDetails({
                 id: id,
@@ -819,6 +845,7 @@ class Wnacg extends ComicSource {
                 tags: tags,
                 description: description,
                 uploader: uploader,
+                chapters: chapters.size > 0 ? chapters : null,
             })
         },
         /**
@@ -834,7 +861,15 @@ class Wnacg extends ComicSource {
                 throw `Invalid Status Code ${res.status}`
             }
             let document = new HtmlDocument(res.body)
-            let thumbnails = document.querySelectorAll("div.pic_box.tb > a > img").map((e) => {
+            let previewImgs = document.querySelectorAll("div.pic_box.tb > a > img")
+            if (previewImgs.length === 0) {
+                // 新结构(多话本)站点只给目录，不提供预览图
+                return {
+                    thumbnails: [],
+                    next: null
+                }
+            }
+            let thumbnails = previewImgs.map((e) => {
                 return 'https:' + e.attributes["src"]
             })
             next = (Number(next) + 1).toString()
@@ -854,6 +889,25 @@ class Wnacg extends ComicSource {
          * @returns {Promise<{images: string[]}>}
          */
         loadEp: async (comicId, epId) => {
+            if (epId) {
+                // 新结构(有目录): 图片在 photos-item-aid-<章节aid>.html 的
+                // mReader.initData({page_url:[...]}) 里。注意数组带尾逗号，不能直接 JSON.parse，
+                // 且站点给的是 http(不通)，必须换成 https。
+                let res = await Network.get(`${this.baseUrl}/photos-item-aid-${epId}.html`, {})
+                if (res.status !== 200) {
+                    throw `Invalid Status Code ${res.status}`
+                }
+                let m = /"page_url"\s*:\s*\[([\s\S]*?)\]/.exec(res.body)
+                if (m) {
+                    let images = Array.from(m[1].matchAll(/"(https?:[^"]+)"/g))
+                        .map((e) => e[1].replace(/^http:/, "https:"))
+                    if (images.length > 0) {
+                        return { images: images }
+                    }
+                }
+                throw "Failed to parse chapter images"
+            }
+            // 老结构(无目录): 从 gallery 页正则提取
             let res = await Network.get(`${this.baseUrl}/photos-gallery-aid-${comicId}.html`, {})
             if (res.status !== 200) {
                 throw `Invalid Status Code ${res.status}`
@@ -988,6 +1042,7 @@ class Wnacg extends ComicSource {
         },
     }
 }
+
 
 
 
