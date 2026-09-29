@@ -27,7 +27,7 @@
         "name": "Picacg",
         "fileName": "picacg.js",
         "key": "picacg",
-        "version": "1.0.6"
+        "version": "1.0.7"
     },
     {
         "name": "nhentai",
@@ -203,3 +203,4 @@
         "description": "mycomic.com漫画源, 遇到Cloudflare验证请在源设置中登录"
     }
 ]
+
