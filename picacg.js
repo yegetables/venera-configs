@@ -3,7 +3,7 @@ class Picacg extends ComicSource {
 
     key = "picacg"
 
-    version = "1.1.0"
+    version = "1.2.0"
 
     minAppVersion = "1.0.0"
 
@@ -127,14 +127,14 @@ class Picacg extends ComicSource {
         return data.comics.map((c) => this.parseComic(c))
     }
 
-    async _loadLatest() {
-        const data = await this._getData('comics?page=1&s=dd')
+    async _loadLatest(sort) {
+        const data = await this._getData(`comics?page=1&s=${sort ?? 'dd'}`)
         return data.comics.docs.map((c) => this.parseComic(c))
     }
 
-    async _loadCategory(category) {
+    async _loadCategory(category, sort) {
         const data = await this._getData(
-            `comics?page=1&c=${encodeURIComponent(category)}&s=dd`
+            `comics?page=1&c=${encodeURIComponent(category)}&s=${sort ?? 'dd'}`
         )
         return data.comics.docs.map((c) => this.parseComic(c))
     }
@@ -156,12 +156,22 @@ class Picacg extends ComicSource {
                     ["哔咔周榜", "D7"],
                     ["哔咔月榜", "D30"],
                 ]
-                const categories = ["大家都在看", "全彩", "嗶咔漢化", "Cosplay"]
+                // 排序设置对所有"最新/分类"板块生效(榜单接口不支持排序)
+                const sort = this.loadSetting('sort') || 'dd'
+                const categories = [
+                    "大家都在看",
+                    "大濕推薦",
+                    "官方都在看",
+                    "全彩",
+                    "嗶咔漢化",
+                    "Cosplay",
+                    "足の恋",
+                ]
                 // 榜单要全部显示，分类只取前 8 部
                 const [leaderboards, latest, categoryLists] = await Promise.all([
                     Promise.all(boards.map((b) => this._loadLeaderboard(b[1]))),
-                    this._loadLatest(),
-                    Promise.all(categories.map((c) => this._loadCategory(c))),
+                    this._loadLatest(sort),
+                    Promise.all(categories.map((c) => this._loadCategory(c, sort))),
                 ])
                 const result = []
                 boards.forEach((b, i) => {
@@ -182,7 +192,11 @@ class Picacg extends ComicSource {
                     comics: latest.slice(0, 8),
                     viewMore: {
                         page: "category",
-                        attributes: { category: "最近更新", param: "latest" },
+                        attributes: {
+                            category: "最近更新",
+                            param: "latest",
+                            options: [sort],
+                        },
                     },
                 })
                 categories.forEach((c, i) => {
@@ -191,7 +205,7 @@ class Picacg extends ComicSource {
                         comics: categoryLists[i].slice(0, 8),
                         viewMore: {
                             page: "category",
-                            attributes: { category: c },
+                            attributes: { category: c, options: [sort] },
                         },
                     })
                 })
@@ -741,6 +755,29 @@ class Picacg extends ComicSource {
             ],
             default: '3',
         },
+        'sort': {
+            type: 'select',
+            title: 'Sort',
+            options: [
+                {
+                    value: 'dd',
+                    text: 'New to old'
+                },
+                {
+                    value: 'da',
+                    text: 'Old to new'
+                },
+                {
+                    value: 'ld',
+                    text: 'Most likes'
+                },
+                {
+                    value: 'vd',
+                    text: 'Most nominated'
+                },
+            ],
+            default: 'dd',
+        },
         'favoriteSort': {
             type: 'select',
             title: 'Favorite sort',
@@ -807,5 +844,6 @@ class Picacg extends ComicSource {
         },
     }
 }
+
 
 
