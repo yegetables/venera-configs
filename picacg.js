@@ -3,7 +3,7 @@ class Picacg extends ComicSource {
 
     key = "picacg"
 
-    version = "1.0.6"
+    version = "1.0.7"
 
     minAppVersion = "1.0.0"
 
@@ -193,7 +193,8 @@ class Picacg extends ComicSource {
                     comics.push(this.parseComic(c))
                 })
                 return {
-                    comics: comics
+                    comics: comics,
+                    maxPage: 1
                 }
             }
         },
@@ -224,7 +225,8 @@ class Picacg extends ComicSource {
                     comics.push(this.parseComic(c))
                 })
                 return {
-                    comics: comics
+                    comics: comics,
+                    maxPage: 1
                 }
             }
         },
@@ -255,7 +257,8 @@ class Picacg extends ComicSource {
                     comics.push(this.parseComic(c))
                 })
                 return {
-                    comics: comics
+                    comics: comics,
+                    maxPage: 1
                 }
             }
         }
@@ -844,3 +847,4 @@ class Picacg extends ComicSource {
         },
     }
 }
+
