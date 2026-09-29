@@ -7,7 +7,7 @@ class Wnacg extends ComicSource {
     // unique id of the source
     key = "wnacg"
 
-    version = "1.0.6"
+    version = "1.0.7"
 
     minAppVersion = "1.0.0"
 
@@ -189,6 +189,90 @@ class Wnacg extends ComicSource {
     }
 
     // explore page list
+    /// 抓一个列表页，取前 8 部
+    async _loadList(url) {
+        let res = await Network.get(this.baseUrl + url, {})
+        if (res.status !== 200) {
+            throw `Invalid Status Code ${res.status}`
+        }
+        let document = new HtmlDocument(res.body)
+        let comics = []
+        for (let el of document.querySelectorAll("div.grid div.gallary_wrap > ul.cc > li")) {
+            comics.push(this.parseComic(el))
+        }
+        document.dispose()
+        return comics.slice(0, 8)
+    }
+
+    // 固定板块: 排行榜 + 各分组下的子分类
+    // url  : 板块内容用(取前 8)
+    // param: "查看更多"用。rank:xx 表示排行榜(分页形态与分类页不同)，其余为分类页路径
+    _extraBoards() {
+        return [
+            { title: "排行", alias: ["排行榜", "排行总览"], url: "/albums-favorite_ranking.html", param: "rank:week" },
+            { title: "排行·今日", alias: ["今日排行"], url: "/albums-favorite_ranking-type-day-cate.html", param: "rank:day" },
+            { title: "排行·本週", alias: ["本週排行"], url: "/albums-favorite_ranking-type-week-cate.html", param: "rank:week" },
+            { title: "排行·本月", alias: ["本月排行"], url: "/albums-favorite_ranking-type-month-cate.html", param: "rank:month" },
+            { title: "排行·今年", alias: ["今年排行"], url: "/albums-favorite_ranking-type-year-cate.html", param: "rank:year" },
+
+            { title: "同人誌·漢化", alias: ["同人漢化"], url: "/albums-index-cate-1.html", param: "/albums-index-cate-1.html" },
+            { title: "同人誌·日語", alias: ["同人日語"], url: "/albums-index-cate-12.html", param: "/albums-index-cate-12.html" },
+            { title: "同人誌·English", alias: [], url: "/albums-index-cate-16.html", param: "/albums-index-cate-16.html" },
+            { title: "同人誌·CG畫集", alias: ["同人CG畫集"], url: "/albums-index-cate-2.html", param: "/albums-index-cate-2.html" },
+            { title: "同人誌·AI圖集", alias: ["同人AI圖集"], url: "/albums-index-cate-37.html", param: "/albums-index-cate-37.html" },
+            { title: "同人誌·3D漫畫", alias: ["同人3D漫畫"], url: "/albums-index-cate-22.html", param: "/albums-index-cate-22.html" },
+            { title: "同人誌·Cosplay", alias: ["同人Cosplay"], url: "/albums-index-cate-3.html", param: "/albums-index-cate-3.html" },
+
+            { title: "單行本·漢化", alias: [], url: "/albums-index-cate-9.html", param: "/albums-index-cate-9.html" },
+            { title: "單行本·日語", alias: [], url: "/albums-index-cate-13.html", param: "/albums-index-cate-13.html" },
+            { title: "單行本·English", alias: [], url: "/albums-index-cate-17.html", param: "/albums-index-cate-17.html" },
+
+            { title: "雜誌短篇·漢化", alias: [], url: "/albums-index-cate-10.html", param: "/albums-index-cate-10.html" },
+            { title: "雜誌短篇·日語", alias: [], url: "/albums-index-cate-14.html", param: "/albums-index-cate-14.html" },
+            { title: "雜誌短篇·English", alias: [], url: "/albums-index-cate-18.html", param: "/albums-index-cate-18.html" },
+        ]
+    }
+
+    /**
+     * 按源设置里的"板块顺序"筛选并重排板块。
+     * 填了哪些就显示哪些、按填的顺序；没填的不显示；清空则全部按默认顺序显示。
+     * 每项可用板块名/别名/编号(默认顺序的 1 基序号)，分隔符 , ， 、 ; ； 空格
+     */
+    _orderParts(parts) {
+        const raw = this.loadSetting('boardOrder') || ''
+        const tokens = String(raw)
+            .split(/[,，、;；\s]+/)
+            .map((t) => t.trim())
+            .filter(Boolean)
+        if (tokens.length == 0) return parts
+        const used = new Set()
+        const ordered = []
+        for (const token of tokens) {
+            let index = -1
+            if (/^\d+$/.test(token)) {
+                const i = parseInt(token, 10) - 1
+                if (i >= 0 && i < parts.length && !used.has(i)) index = i
+            } else {
+                const t = token.toLowerCase()
+                index = parts.findIndex(
+                    (p, i) =>
+                        !used.has(i) &&
+                        p.match.some(
+                            (m) =>
+                                m.toLowerCase() === t ||
+                                m.toLowerCase().includes(t) ||
+                                t.includes(m.toLowerCase())
+                        )
+                )
+            }
+            if (index >= 0) {
+                used.add(index)
+                ordered.push(parts[index])
+            }
+        }
+        return ordered
+    }
+
     explore = [
         {
             // title of the page.
@@ -198,44 +282,55 @@ class Wnacg extends ComicSource {
             /// multiPartPage or multiPageComicList or mixed
             type: "multiPartPage",
 
-            /**
-             * load function
-             * @param page {number | null} - page number, null for `singlePageWithMultiPart` type
-             * @returns {{}}
-             * - for `multiPartPage` type, return [{title: string, comics: Comic[], viewMore: string?}]
-             * - for `multiPageComicList` type, for each page(1-based), return {comics: Comic[], maxPage: number}
-             * - for `mixed` type, use param `page` as index. for each index(0-based), return {data: [], maxPage: number?}, data is an array contains Comic[] or {title: string, comics: Comic[], viewMore: string?}
-             */
-            load: async (page) => {
+            load: async () => {
+                // 1) 首页板块(站点结构变化时自动跟随)
                 let res = await Network.get(this.baseUrl, {})
                 if (res.status !== 200) {
                     throw `Invalid Status Code ${res.status}`
                 }
                 let document = new HtmlDocument(res.body)
-                let titleBlocks = document.querySelectorAll("div.title_sort");
-                let comicBlocks = document.querySelectorAll("div.bodywrap");
+                let titleBlocks = document.querySelectorAll("div.title_sort")
+                let comicBlocks = document.querySelectorAll("div.bodywrap")
                 if (titleBlocks.length !== comicBlocks.length) {
                     throw "Invalid Page"
                 }
-                let result = []
+                const parts = []
                 for (let i = 0; i < titleBlocks.length; i++) {
                     let title = titleBlocks[i].querySelector("div.title_h2").text.replaceAll(/\s+/g, '')
                     let link = titleBlocks[i].querySelector("div.r > a").attributes["href"]
                     let comics = []
-                    let comicBlock = comicBlocks[i]
-                    let comicElements = comicBlock.querySelectorAll("div.gallary_wrap > ul.cc > li")
-                    for (let comicElement of comicElements) {
-                        comics.push(this.parseComic(comicElement))
+                    for (let el of comicBlocks[i].querySelectorAll("div.gallary_wrap > ul.cc > li")) {
+                        comics.push(this.parseComic(el))
                     }
-                    result.push({
+                    parts.push({
                         title: title,
+                        match: [title],
                         comics: comics,
-                        viewMore: `category:${title}@${link}`
+                        viewMore: {
+                            page: "category",
+                            attributes: { category: title, param: link },
+                        },
                     })
                 }
                 document.dispose()
-                return result
-            }
+
+                // 2) 追加固定板块(排行榜 + 各分组子分类)
+                const boards = this._extraBoards()
+                const loaded = await Promise.all(boards.map((b) => this._loadList(b.url)))
+                boards.forEach((b, i) => {
+                    parts.push({
+                        title: b.title,
+                        match: [b.title].concat(b.alias),
+                        comics: loaded[i],
+                        viewMore: {
+                            page: "category",
+                            attributes: { category: b.title, param: b.param },
+                        },
+                    })
+                })
+
+                return this._orderParts(parts)
+            },
         }
     ]
 
@@ -279,7 +374,7 @@ class Wnacg extends ComicSource {
                 // number of comics to display at the same time
                 // randomNumber: 5,
 
-                categories: ["同人誌", "漢化", "日語", "English", "CG畫集", "3D漫畫", "寫真Cosplay"],
+                categories: ["同人誌", "漢化", "日語", "English", "CG畫集", "AI圖集", "3D漫畫", "寫真Cosplay"],
 
                 // category or search
                 // if `category`, use categoryComics.load to load comics
@@ -293,6 +388,7 @@ class Wnacg extends ComicSource {
                     "/albums-index-cate-12.html",
                     "/albums-index-cate-16.html",
                     "/albums-index-cate-2.html",
+                    "/albums-index-cate-37.html",
                     "/albums-index-cate-22.html",
                     "/albums-index-cate-3.html",
                 ],
@@ -393,24 +489,31 @@ class Wnacg extends ComicSource {
 
     /// category comic loading related
     categoryComics = {
-        /**
-         * load comics of a category
-         * @param category {string} - category name
-         * @param param {string?} - category param
-         * @param options {string[]} - options from optionList
-         * @param page {number} - page number
-         * @returns {Promise<{comics: Comic[], maxPage: number}>}
-         */
         load: async (category, param, options, page) => {
-            let url = this.baseUrl + param
-            if (page !== 0) {
-                if (!url.includes("-")) {
-                    url = url.replaceAll(".html", "-.html");
+            // 排序: 站点用 cookie Mpic_sortset_album 控制(见 common.js 的 sort_setting)
+            if (options && options[0]) {
+                Network.setCookies(this.baseUrl, [
+                    new Cookie({ name: "Mpic_sortset_album", value: options[0] }),
+                ])
+            }
+            let url
+            if (typeof param === "string" && param.indexOf("rank:") === 0) {
+                // 排行榜的分页形态与分类页不同
+                const type = param.slice("rank:".length)
+                url = page > 1
+                    ? `${this.baseUrl}/albums-favorite_ranking-page-${page}-type-${type}.html`
+                    : `${this.baseUrl}/albums-favorite_ranking-type-${type}-cate.html`
+            } else {
+                url = this.baseUrl + param
+                if (page !== 0) {
+                    if (!url.includes("-")) {
+                        url = url.replaceAll(".html", "-.html")
+                    }
+                    url = url.replaceAll("index", "")
+                    let lr = url.split("albums-")
+                    lr[1] = `index-page-${page}${lr[1]}`
+                    url = `${lr[0]}albums-${lr[1]}`
                 }
-                url = url.replaceAll("index", "");
-                let lr = url.split("albums-");
-                lr[1] = `index-page-${page}${lr[1]}`;
-                url = `${lr[0]}albums-${lr[1]}`;
             }
 
             let res = await Network.get(url, {})
@@ -431,11 +534,23 @@ class Wnacg extends ComicSource {
                 maxPage: pages,
             }
         },
+        // 排序选项(站点通过 cookie 实现)
+        optionList: [
+            {
+                label: "Sort",
+                options: [
+                    "ct_asc-創建時間",
+                    "ut_desc-上傳時間",
+                    "p_desc-圖片數",
+                ],
+            },
+        ],
         ranking: {
             options: [
                 "day-Day",
                 "week-Week",
                 "month-Month",
+                "year-Year",
             ],
             load: async (option, page) => {
                 let url = `${this.baseUrl}/albums-favorite_ranking-type-${option}.html`
@@ -740,6 +855,35 @@ class Wnacg extends ComicSource {
         }
 
         return {
+            boardOrder: {
+                title: "Board order",
+                type: "input",
+                default: '最新更新,排行,同人誌CG畫集,同人誌·漢化,同人誌·日語,同人誌·English,同人誌·CG畫集,同人誌·AI圖集,同人誌·3D漫畫,同人誌·Cosplay,單行漫畫,雜誌短篇,韓國漫畫',
+                validator: null,
+            },
+            boardOrderList: {
+                title: "Available boards",
+                type: "callback",
+                buttonText: "Show",
+                callback: async () => {
+                    const names = this._extraBoards().map((b) => b.title)
+                    try {
+                        const res = await Network.get(this.baseUrl, {})
+                        if (res.status === 200) {
+                            const doc = new HtmlDocument(res.body)
+                            for (const b of doc.querySelectorAll("div.title_sort")) {
+                                names.push(b.querySelector("div.title_h2").text.replaceAll(/\s+/g, ""))
+                            }
+                            doc.dispose()
+                        }
+                    } catch (e) {}
+                    UI.showDialog(
+                        "Available boards",
+                        names.map((n, i) => `${i + 1}. ${n}`).join("\n"),
+                        [{ text: "OK", callback: () => {} }]
+                    )
+                },
+            },
             refreshDomains: {
                 title: "Refresh Domain List",
                 type: "callback",
@@ -778,6 +922,13 @@ class Wnacg extends ComicSource {
             'Day': '日',
             'Week': '周',
             'Month': '月',
+            'Year': '年',
+            'Board order': '板块顺序',
+            'Available boards': '可选板块',
+            'Sort': '排序',
+            '創建時間': '创建时间',
+            '上傳時間': '上传时间',
+            '圖片數': '图片数',
         },
         'zh_TW': {
             'Refresh Domain List': '刷新域名列表',
@@ -790,7 +941,12 @@ class Wnacg extends ComicSource {
             'Day': '日',
             'Week': '周',
             'Month': '月',
+            'Year': '年',
+            'Board order': '看板順序',
+            'Available boards': '可選板塊',
+            'Sort': '排序',
         },
     }
 }
+
 
