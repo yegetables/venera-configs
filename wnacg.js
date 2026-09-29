@@ -7,7 +7,7 @@ class Wnacg extends ComicSource {
     // unique id of the source
     key = "wnacg"
 
-    version = "1.0.7"
+    version = "1.0.8"
 
     minAppVersion = "1.0.0"
 
@@ -254,16 +254,22 @@ class Wnacg extends ComicSource {
                 if (i >= 0 && i < parts.length && !used.has(i)) index = i
             } else {
                 const t = token.toLowerCase()
+                // 先全量精确匹配，再退回包含匹配。
+                // 否则 "排行·本週" 会被 "排行" 抢先命中(t.includes(m))
                 index = parts.findIndex(
-                    (p, i) =>
-                        !used.has(i) &&
-                        p.match.some(
-                            (m) =>
-                                m.toLowerCase() === t ||
-                                m.toLowerCase().includes(t) ||
-                                t.includes(m.toLowerCase())
-                        )
+                    (p, i) => !used.has(i) && p.match.some((m) => m.toLowerCase() === t)
                 )
+                if (index < 0) {
+                    index = parts.findIndex(
+                        (p, i) =>
+                            !used.has(i) &&
+                            p.match.some(
+                                (m) =>
+                                    m.toLowerCase().includes(t) ||
+                                    t.includes(m.toLowerCase())
+                            )
+                    )
+                }
             }
             if (index >= 0) {
                 used.add(index)
@@ -283,7 +289,30 @@ class Wnacg extends ComicSource {
             type: "multiPartPage",
 
             load: async () => {
-                // 1) 首页板块(站点结构变化时自动跟随)
+                // 候选顺序 = 固定板块 + 首页板块，与源设置"可选板块"列表的编号一一对应
+                const boards = this._extraBoards()
+                const extraUrls = new Set(boards.map((b) => b.url))
+                // 首页板块标题改名(标注这是分组总览, 区别于子分类板块)
+                const titleOverride = {
+                    "/albums-index-cate-5.html": "同人誌CG畫集(总览)",
+                }
+
+                // 1) 固定板块(排行榜 + 各分组子分类)
+                const parts = []
+                const loaded = await Promise.all(boards.map((b) => this._loadList(b.url)))
+                boards.forEach((b, i) => {
+                    parts.push({
+                        title: b.title,
+                        match: [b.title].concat(b.alias),
+                        comics: loaded[i],
+                        viewMore: {
+                            page: "category",
+                            attributes: { category: b.title, param: b.param },
+                        },
+                    })
+                })
+
+                // 2) 首页板块(站点结构变化时自动跟随)；与固定板块指向同一页的会丢弃
                 let res = await Network.get(this.baseUrl, {})
                 if (res.status !== 200) {
                     throw `Invalid Status Code ${res.status}`
@@ -294,10 +323,11 @@ class Wnacg extends ComicSource {
                 if (titleBlocks.length !== comicBlocks.length) {
                     throw "Invalid Page"
                 }
-                const parts = []
                 for (let i = 0; i < titleBlocks.length; i++) {
-                    let title = titleBlocks[i].querySelector("div.title_h2").text.replaceAll(/\s+/g, '')
                     let link = titleBlocks[i].querySelector("div.r > a").attributes["href"]
+                    if (extraUrls.has(link)) continue
+                    let title = titleOverride[link] ||
+                        titleBlocks[i].querySelector("div.title_h2").text.replaceAll(/\s+/g, '')
                     let comics = []
                     for (let el of comicBlocks[i].querySelectorAll("div.gallary_wrap > ul.cc > li")) {
                         comics.push(this.parseComic(el))
@@ -313,21 +343,6 @@ class Wnacg extends ComicSource {
                     })
                 }
                 document.dispose()
-
-                // 2) 追加固定板块(排行榜 + 各分组子分类)
-                const boards = this._extraBoards()
-                const loaded = await Promise.all(boards.map((b) => this._loadList(b.url)))
-                boards.forEach((b, i) => {
-                    parts.push({
-                        title: b.title,
-                        match: [b.title].concat(b.alias),
-                        comics: loaded[i],
-                        viewMore: {
-                            page: "category",
-                            attributes: { category: b.title, param: b.param },
-                        },
-                    })
-                })
 
                 return this._orderParts(parts)
             },
@@ -858,7 +873,7 @@ class Wnacg extends ComicSource {
             boardOrder: {
                 title: "Board order",
                 type: "input",
-                default: '最新更新,排行,同人誌CG畫集,同人誌·漢化,同人誌·日語,同人誌·English,同人誌·CG畫集,同人誌·AI圖集,同人誌·3D漫畫,同人誌·Cosplay,單行漫畫,雜誌短篇,韓國漫畫',
+                default: '11,10,3,4,9,12,19,23,6',
                 validator: null,
             },
             boardOrderList: {
@@ -866,12 +881,16 @@ class Wnacg extends ComicSource {
                 type: "callback",
                 buttonText: "Show",
                 callback: async () => {
-                    const names = this._extraBoards().map((b) => b.title)
+                    const boards = this._extraBoards()
+                    const extraUrls = new Set(boards.map((b) => b.url))
+                    const names = boards.map((b) => b.title)
                     try {
                         const res = await Network.get(this.baseUrl, {})
                         if (res.status === 200) {
                             const doc = new HtmlDocument(res.body)
                             for (const b of doc.querySelectorAll("div.title_sort")) {
+                                const link = b.querySelector("div.r > a").attributes["href"]
+                                if (extraUrls.has(link)) continue
                                 names.push(b.querySelector("div.title_h2").text.replaceAll(/\s+/g, ""))
                             }
                             doc.dispose()
@@ -929,6 +948,7 @@ class Wnacg extends ComicSource {
             '創建時間': '创建时间',
             '上傳時間': '上传时间',
             '圖片數': '图片数',
+            '总览': '总览',
         },
         'zh_TW': {
             'Refresh Domain List': '刷新域名列表',
@@ -945,8 +965,10 @@ class Wnacg extends ComicSource {
             'Board order': '看板順序',
             'Available boards': '可選板塊',
             'Sort': '排序',
+            '总览': '總覽',
         },
     }
 }
+
 
 
