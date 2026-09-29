@@ -35,6 +35,28 @@ function parseEpIdFromHref(href) {
 }
 
 /**
+ * 解码章节页图片的真实 URL。
+ * 站点改版后 img 的真实地址不在 src 里，而是编码在 data-locked 属性:
+ *   data-locked = "JCOMIC_TRAPS_" + 反转(base64(真实URL))
+ * 解码步骤: 去掉前缀 -> 反转 -> 补齐 base64 padding -> base64 解码。
+ * @param {string} locked - data-locked 属性值
+ * @returns {string} 真实图片 URL，失败返回 ""
+ */
+function decodeLockedImageUrl(locked) {
+  if (!locked || typeof locked !== "string") return "";
+  const m = /^JCOMIC_TRAPS?_(.*)$/.exec(locked);
+  if (!m) return "";
+  try {
+    let s = m[1].split("").reverse().join("").replace(/=/g, "")
+      .replace(/-/g, "+").replace(/_/g, "/");
+    s += "=".repeat((4 - (s.length % 4)) % 4);
+    return Convert.decodeUtf8(Convert.decodeBase64(s));
+  } catch (e) {
+    return "";
+  }
+}
+
+/**
  * 解析作品卡片 -> Comic
  * @param {Element} card
  */
@@ -126,7 +148,7 @@ class JComic extends ComicSource {
   name = "jcomic.net";
   key = "jcomic";
 
-  version = "1.0.0";
+  version = "1.0.1";
   minAppVersion = "1.4.6";
 
   url =
@@ -452,9 +474,16 @@ class JComic extends ComicSource {
 
       const doc = new HtmlDocument(resp.body);
       const imgs = doc.querySelectorAll("img.comic-thumb");
-      const images = Array.from(imgs).map((img) => img.attributes["src"]);
+      const images = [];
+      imgs.forEach((img) => {
+        const attrs = img.attributes;
+        images.push(
+          decodeLockedImageUrl(attrs["data-locked"]) || attrs["src"] || ""
+        );
+      });
+      doc.dispose();
 
-      return { images };
+      return { images: images.filter(Boolean) };
     },
 
     onImageLoad: (url, comicId, epId) => {
