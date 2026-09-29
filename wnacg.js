@@ -7,7 +7,7 @@ class Wnacg extends ComicSource {
     // unique id of the source
     key = "wnacg"
 
-    version = "1.0.8"
+    version = "1.0.9"
 
     minAppVersion = "1.0.0"
 
@@ -297,54 +297,73 @@ class Wnacg extends ComicSource {
                     "/albums-index-cate-5.html": "同人誌CG畫集(总览)",
                 }
 
-                // 1) 固定板块(排行榜 + 各分组子分类)
-                const parts = []
-                const loaded = await Promise.all(boards.map((b) => this._loadList(b.url)))
-                boards.forEach((b, i) => {
-                    parts.push({
-                        title: b.title,
-                        match: [b.title].concat(b.alias),
-                        comics: loaded[i],
-                        viewMore: {
-                            page: "category",
-                            attributes: { category: b.title, param: b.param },
-                        },
-                    })
-                })
+                // 1) 固定板块的"骨架"(内容稍后按需加载)
+                const fixed = boards.map((b) => ({
+                    title: b.title,
+                    match: [b.title].concat(b.alias),
+                    comics: null,
+                    extra: b,
+                    viewMore: {
+                        page: "category",
+                        attributes: { category: b.title, param: b.param },
+                    },
+                }))
 
-                // 2) 首页板块(站点结构变化时自动跟随)；与固定板块指向同一页的会丢弃
-                let res = await Network.get(this.baseUrl, {})
-                if (res.status !== 200) {
-                    throw `Invalid Status Code ${res.status}`
-                }
-                let document = new HtmlDocument(res.body)
-                let titleBlocks = document.querySelectorAll("div.title_sort")
-                let comicBlocks = document.querySelectorAll("div.bodywrap")
-                if (titleBlocks.length !== comicBlocks.length) {
-                    throw "Invalid Page"
-                }
-                for (let i = 0; i < titleBlocks.length; i++) {
-                    let link = titleBlocks[i].querySelector("div.r > a").attributes["href"]
-                    if (extraUrls.has(link)) continue
-                    let title = titleOverride[link] ||
-                        titleBlocks[i].querySelector("div.title_h2").text.replaceAll(/\s+/g, '')
-                    let comics = []
-                    for (let el of comicBlocks[i].querySelectorAll("div.gallary_wrap > ul.cc > li")) {
-                        comics.push(this.parseComic(el))
+                // 2) 首页板块(内容直接来自首页 HTML，无需额外请求)。
+                //    站点结构变化时自动跟随；与固定板块指向同一页的会丢弃。
+                //    首页拿不到时只保留固定板块，不让整页失败。
+                const home = []
+                try {
+                    let res = await Network.get(this.baseUrl, {})
+                    if (res.status === 200) {
+                        let document = new HtmlDocument(res.body)
+                        let titleBlocks = document.querySelectorAll("div.title_sort")
+                        let comicBlocks = document.querySelectorAll("div.bodywrap")
+                        for (let i = 0; i < titleBlocks.length; i++) {
+                            let link = titleBlocks[i].querySelector("div.r > a").attributes["href"]
+                            if (extraUrls.has(link)) continue
+                            let title = titleOverride[link] ||
+                                titleBlocks[i].querySelector("div.title_h2").text.replaceAll(/\s+/g, '')
+                            let comics = []
+                            for (let el of comicBlocks[i].querySelectorAll("div.gallary_wrap > ul.cc > li")) {
+                                comics.push(this.parseComic(el))
+                            }
+                            home.push({
+                                title: title,
+                                match: [title],
+                                comics: comics,
+                                extra: null,
+                                viewMore: {
+                                    page: "category",
+                                    attributes: { category: title, param: link },
+                                },
+                            })
+                        }
+                        document.dispose()
                     }
-                    parts.push({
-                        title: title,
-                        match: [title],
-                        comics: comics,
-                        viewMore: {
-                            page: "category",
-                            attributes: { category: title, param: link },
-                        },
-                    })
-                }
-                document.dispose()
+                } catch (e) {}
 
-                return this._orderParts(parts)
+                // 3) 按"板块顺序"挑出要显示的板块(编号与可选板块一致)
+                const selected = this._orderParts(fixed.concat(home))
+
+                // 4) 只加载被选中的固定板块，串行 + 间隔。
+                //    站点在 Cloudflare 后面，并发一多就会被 challenge(429/500)；
+                //    单个板块失败只跳过该板块，不影响整页。
+                const result = []
+                for (const part of selected) {
+                    if (!part.extra) {
+                        result.push({ title: part.title, comics: part.comics, viewMore: part.viewMore })
+                        continue
+                    }
+                    try {
+                        part.comics = await this._loadList(part.extra.url)
+                    } catch (e) {
+                        continue
+                    }
+                    result.push({ title: part.title, comics: part.comics, viewMore: part.viewMore })
+                    await new Promise((resolve) => setTimeout(resolve, 150))
+                }
+                return result
             },
         }
     ]
@@ -969,6 +988,7 @@ class Wnacg extends ComicSource {
         },
     }
 }
+
 
 
 
