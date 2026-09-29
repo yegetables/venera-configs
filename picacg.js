@@ -3,7 +3,7 @@ class Picacg extends ComicSource {
 
     key = "picacg"
 
-    version = "1.0.7"
+    version = "1.1.0"
 
     minAppVersion = "1.0.0"
 
@@ -103,164 +103,100 @@ class Picacg extends ComicSource {
         })
     }
 
+    /// 带 401 重登的统一请求，返回响应体的 data 字段
+    async _getData(path) {
+        let res = await Network.get(
+            `${this.loadSetting('base_url')}/${path}`,
+            this.buildHeaders('GET', path, this.loadData('token'))
+        )
+        if (res.status === 401) {
+            await this.account.reLogin()
+            res = await Network.get(
+                `${this.loadSetting('base_url')}/${path}`,
+                this.buildHeaders('GET', path, this.loadData('token'))
+            )
+        }
+        if (res.status !== 200) {
+            throw 'Invalid status code: ' + res.status
+        }
+        return JSON.parse(res.body).data
+    }
+
+    async _loadLeaderboard(tt) {
+        const data = await this._getData(`comics/leaderboard?tt=${tt}&ct=VC`)
+        return data.comics.map((c) => this.parseComic(c))
+    }
+
+    async _loadLatest() {
+        const data = await this._getData('comics?page=1&s=dd')
+        return data.comics.docs.map((c) => this.parseComic(c))
+    }
+
+    async _loadCategory(category) {
+        const data = await this._getData(
+            `comics?page=1&c=${encodeURIComponent(category)}&s=dd`
+        )
+        return data.comics.docs.map((c) => this.parseComic(c))
+    }
+
     explore = [
         {
-            title: "Picacg Random",
-            type: "multiPageComicList",
-            load: async (page) => {
+            // 多板块首页：3 个榜单(全部显示) + 最近更新 + 热门分类(各前 8 部)
+            title: "Picacg",
+
+            // multiPartPage / multiPageComicList / mixed
+            type: "multiPartPage",
+
+            load: async () => {
                 if (!this.isLogged) {
                     throw 'Not logged in'
                 }
-                let res = await Network.get(
-                    `${this.loadSetting('base_url')}/comics/random`,
-                    this.buildHeaders('GET', 'comics/random', this.loadData('token'))
-                )
-                if(res.status === 401) {
-                    await this.account.reLogin()
-                    res = await Network.get(
-                        `${this.loadSetting('base_url')}/comics/random`,
-                        this.buildHeaders('GET', 'comics/random', this.loadData('token'))
-                    )
-                }
-                if (res.status !== 200) {
-                    throw 'Invalid status code: ' + res.status
-                }
-                let data = JSON.parse(res.body)
-                let comics = []
-                data.data.comics.forEach(c => {
-                    comics.push(this.parseComic(c))
+                const boards = [
+                    ["哔咔日榜", "H24"],
+                    ["哔咔周榜", "D7"],
+                    ["哔咔月榜", "D30"],
+                ]
+                const categories = ["大家都在看", "全彩", "嗶咔漢化", "Cosplay"]
+                // 榜单要全部显示，分类只取前 8 部
+                const [leaderboards, latest, categoryLists] = await Promise.all([
+                    Promise.all(boards.map((b) => this._loadLeaderboard(b[1]))),
+                    this._loadLatest(),
+                    Promise.all(categories.map((c) => this._loadCategory(c))),
+                ])
+                const result = []
+                boards.forEach((b, i) => {
+                    result.push({
+                        title: b[0],
+                        comics: leaderboards[i],
+                        viewMore: {
+                            page: "category",
+                            attributes: {
+                                category: b[0],
+                                param: `leaderboard:${b[1]}`,
+                            },
+                        },
+                    })
                 })
-                return {
-                    comics: comics
-                }
-            }
-        },
-        {
-            title: "Picacg Latest",
-            type: "multiPageComicList",
-            load: async (page) => {
-                if (!this.isLogged) {
-                    throw 'Not logged in'
-                }
-                let res = await Network.get(
-                    `${this.loadSetting('base_url')}/comics?page=${page}&s=dd`,
-                    this.buildHeaders('GET', `comics?page=${page}&s=dd`, this.loadData('token'))
-                )
-                if(res.status === 401) {
-                    await this.account.reLogin()
-                    res = await Network.get(
-                        `${this.loadSetting('base_url')}/comics?page=${page}&s=dd`,
-                        this.buildHeaders('GET', `comics?page=${page}&s=dd`, this.loadData('token'))
-                    )
-                }
-                if (res.status !== 200) {
-                    throw 'Invalid status code: ' + res.status
-                }
-                let data = JSON.parse(res.body)
-                let comics = []
-                data.data.comics.docs.forEach(c => {
-                    comics.push(this.parseComic(c))
+                result.push({
+                    title: "最近更新",
+                    comics: latest.slice(0, 8),
+                    viewMore: {
+                        page: "category",
+                        attributes: { category: "最近更新", param: "latest" },
+                    },
                 })
-                return {
-                    comics: comics
-                }
-            }
-        },
-        {
-            title: "Picacg H24",
-            type: "multiPageComicList",
-            load: async (page) => {
-                if (!this.isLogged) {
-                    throw 'Not logged in'
-                }
-                let res = await Network.get(
-                    `${this.loadSetting('base_url')}/comics/leaderboard?tt=H24&ct=VC`,
-                    this.buildHeaders('GET', 'comics/leaderboard?tt=H24&ct=VC', this.loadData('token'))
-                )
-                if (res.status === 401) {
-                    await this.account.reLogin()
-                    res = await Network.get(
-                        `${this.loadSetting('base_url')}/comics/leaderboard?tt=H24&ct=VC`,
-                        this.buildHeaders('GET', 'comics/leaderboard?tt=H24&ct=VC', this.loadData('token'))
-                    )
-                }
-                if (res.status !== 200) {
-                    throw 'Invalid status code: ' + res.status
-                }
-                let data = JSON.parse(res.body)
-                let comics = []
-                data.data.comics.forEach(c => {
-                    comics.push(this.parseComic(c))
+                categories.forEach((c, i) => {
+                    result.push({
+                        title: c,
+                        comics: categoryLists[i].slice(0, 8),
+                        viewMore: {
+                            page: "category",
+                            attributes: { category: c },
+                        },
+                    })
                 })
-                return {
-                    comics: comics,
-                    maxPage: 1
-                }
-            }
-        },
-        {
-            title: "Picacg D7",
-            type: "multiPageComicList",
-            load: async (page) => {
-                if (!this.isLogged) {
-                    throw 'Not logged in'
-                }
-                let res = await Network.get(
-                    `${this.loadSetting('base_url')}/comics/leaderboard?tt=D7&ct=VC`,
-                    this.buildHeaders('GET', 'comics/leaderboard?tt=D7&ct=VC', this.loadData('token'))
-                )
-                if (res.status === 401) {
-                    await this.account.reLogin()
-                    res = await Network.get(
-                        `${this.loadSetting('base_url')}/comics/leaderboard?tt=D7&ct=VC`,
-                        this.buildHeaders('GET', 'comics/leaderboard?tt=D7&ct=VC', this.loadData('token'))
-                    )
-                }
-                if (res.status !== 200) {
-                    throw 'Invalid status code: ' + res.status
-                }
-                let data = JSON.parse(res.body)
-                let comics = []
-                data.data.comics.forEach(c => {
-                    comics.push(this.parseComic(c))
-                })
-                return {
-                    comics: comics,
-                    maxPage: 1
-                }
-            }
-        },
-        {
-            title: "Picacg D30",
-            type: "multiPageComicList",
-            load: async (page) => {
-                if (!this.isLogged) {
-                    throw 'Not logged in'
-                }
-                let res = await Network.get(
-                    `${this.loadSetting('base_url')}/comics/leaderboard?tt=D30&ct=VC`,
-                    this.buildHeaders('GET', 'comics/leaderboard?tt=D30&ct=VC', this.loadData('token'))
-                )
-                if (res.status === 401) {
-                    await this.account.reLogin()
-                    res = await Network.get(
-                        `${this.loadSetting('base_url')}/comics/leaderboard?tt=D30&ct=VC`,
-                        this.buildHeaders('GET', 'comics/leaderboard?tt=D30&ct=VC', this.loadData('token'))
-                    )
-                }
-                if (res.status !== 200) {
-                    throw 'Invalid status code: ' + res.status
-                }
-                let data = JSON.parse(res.body)
-                let comics = []
-                data.data.comics.forEach(c => {
-                    comics.push(this.parseComic(c))
-                })
-                return {
-                    comics: comics,
-                    maxPage: 1
-                }
-            }
+                return result
+            },
         }
     ]
 
@@ -324,16 +260,29 @@ class Picacg extends ComicSource {
     /// 分类漫画页面, 即点击分类标签后进入的页面
     categoryComics = {
         load: async (category, param, options, page) => {
-            let type = param ?? 'c'
+            const sort = (options && options[0]) || 'dd'
+            // param 为 sentinel 时走专用查询(供多板块页的"查看更多"跳转)：
+            //   latest         -> 全站最近更新
+            //   leaderboard:XX -> 榜单(接口固定返回一页, 不分页)
+            // 其余情况 param 是分类查询的字段名(默认 c)
+            const isLeaderboard = !!param && param.indexOf('leaderboard:') === 0
+            let path
+            if (param === 'latest') {
+                path = `comics?page=${page}&s=${sort}`
+            } else if (isLeaderboard) {
+                path = `comics/leaderboard?tt=${param.slice('leaderboard:'.length)}&ct=VC`
+            } else {
+                path = `comics?page=${page}&${param ?? 'c'}=${encodeURIComponent(category)}&s=${sort}`
+            }
             let res = await Network.get(
-                `${this.loadSetting('base_url')}/comics?page=${page}&${type}=${encodeURIComponent(category)}&s=${options[0]}`,
-                this.buildHeaders('GET', `comics?page=${page}&${type}=${encodeURIComponent(category)}&s=${options[0]}`, this.loadData('token'))
+                `${this.loadSetting('base_url')}/${path}`,
+                this.buildHeaders('GET', path, this.loadData('token'))
             )
             if(res.status === 401) {
                 await this.account.reLogin()
                 res = await Network.get(
-                    `${this.loadSetting('base_url')}/comics?page=${page}&${type}=${encodeURIComponent(category)}&s=${options[0]}`,
-                    this.buildHeaders('GET', `comics?page=${page}&${type}=${encodeURIComponent(category)}&s=${options[0]}`, this.loadData('token'))
+                    `${this.loadSetting('base_url')}/${path}`,
+                    this.buildHeaders('GET', path, this.loadData('token'))
                 )
             }
             if (res.status !== 200) {
@@ -341,6 +290,15 @@ class Picacg extends ComicSource {
             }
             let data = JSON.parse(res.body)
             let comics = []
+            if (isLeaderboard) {
+                data.data.comics.forEach(c => {
+                    comics.push(this.parseComic(c))
+                })
+                return {
+                    comics: comics,
+                    maxPage: 1
+                }
+            }
             data.data.comics.docs.forEach(c => {
                 comics.push(this.parseComic(c))
             })
@@ -802,6 +760,7 @@ class Picacg extends ComicSource {
 
     translation = {
         'zh_CN': {
+            'Picacg': "哔咔",
             'Picacg Random': "哔咔随机",
             'Picacg Latest': "哔咔最新",
             'Picacg H24': "哔咔日榜",
@@ -824,6 +783,7 @@ class Picacg extends ComicSource {
             'Sort': "排序",
         },
         'zh_TW': {
+            'Picacg': "哔咔",
             'Picacg Random': "哔咔隨機",
             'Picacg Latest': "哔咔最新",
             'Picacg H24': "哔咔日榜",
@@ -847,4 +807,5 @@ class Picacg extends ComicSource {
         },
     }
 }
+
 
