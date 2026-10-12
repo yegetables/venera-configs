@@ -3,7 +3,7 @@ class Picacg extends ComicSource {
 
     key = "picacg"
 
-    version = "1.1.1"
+    version = "1.2.0"
 
     minAppVersion = "1.0.0"
 
@@ -240,6 +240,8 @@ class Picacg extends ComicSource {
                 name: "主题",
                 type: "fixed",
                 categories: [
+                    "最近更新",
+                    "随机本子",
                     "大家都在看",
                     "大濕推薦",
                     "那年今天",
@@ -291,6 +293,19 @@ class Picacg extends ComicSource {
     categoryComics = {
         load: async (category, param, options, page) => {
             const sort = (options && options[0]) || 'dd'
+            // 分类页头两项是站点特殊入口，不是分类查询：
+            //   随机本子 -> /comics/random（接口固定给一批，不分页）
+            //   最近更新 -> 全站最近更新（复用下面的 latest sentinel，可分页）
+            if (category === "随机本子") {
+                const data = await this._getData("comics/random")
+                return {
+                    comics: data.comics.map((c) => this.parseComic(c)),
+                    maxPage: 1,
+                }
+            }
+            if (category === "最近更新") {
+                param = "latest"
+            }
             // param 是 sentinel 时走专用查询（供探索页多板块的"查看更多"跳转）：
             //   leaderboard:XX -> 榜单（接口一次给全，源里按 8 条切片翻页）
             //   latest         -> 全站最近更新（可分页）
