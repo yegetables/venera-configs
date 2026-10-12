@@ -7,7 +7,7 @@ class Wnacg extends ComicSource {
     // unique id of the source
     key = "wnacg"
 
-    version = "1.0.11"
+    version = "1.1.0"
 
     minAppVersion = "1.0.0"
 
@@ -388,6 +388,21 @@ class Wnacg extends ComicSource {
                 // [Optional] {string} cannot be used with `categoryParams`, set all category params to this value
                 groupParam: null,
             },
+            {
+                // 站点顶部导航的「排行」(/albums-favorite_ranking.html)，
+                // 它自己的分页形态与分类页不同，见 categoryComics.load 里的 rank: 分支
+                name: "排行",
+                type: "fixed",
+                categories: ["今日", "本週", "本月", "今年"],
+                itemType: "category",
+                categoryParams: [
+                    "rank:day",
+                    "rank:week",
+                    "rank:month",
+                    "rank:year",
+                ],
+                groupParam: null,
+            },
         ],
         // enable ranking page
         enableRankingPage: true,
@@ -411,15 +426,24 @@ class Wnacg extends ComicSource {
                     new Cookie({ name: "Mpic_sortset_album", value: options[0] }),
                 ])
             }
-            let url = this.baseUrl + param
-            if (page !== 0) {
-                if (!url.includes("-")) {
-                    url = url.replaceAll(".html", "-.html");
+            let url
+            if (typeof param === "string" && param.indexOf("rank:") === 0) {
+                // 收藏排行榜(分类页「排行」组)：站点分页形态与分类页不同
+                const type = param.slice("rank:".length)
+                url = page > 1
+                    ? `${this.baseUrl}/albums-favorite_ranking-page-${page}-type-${type}.html`
+                    : `${this.baseUrl}/albums-favorite_ranking-type-${type}-cate.html`
+            } else {
+                url = this.baseUrl + param
+                if (page !== 0) {
+                    if (!url.includes("-")) {
+                        url = url.replaceAll(".html", "-.html");
+                    }
+                    url = url.replaceAll("index", "");
+                    let lr = url.split("albums-");
+                    lr[1] = `index-page-${page}${lr[1]}`;
+                    url = `${lr[0]}albums-${lr[1]}`;
                 }
-                url = url.replaceAll("index", "");
-                let lr = url.split("albums-");
-                lr[1] = `index-page-${page}${lr[1]}`;
-                url = `${lr[0]}albums-${lr[1]}`;
             }
 
             let res = await Network.get(url, {})
@@ -433,7 +457,7 @@ class Wnacg extends ComicSource {
                 comics.push(this.parseComic(comicElement))
             }
             let pagesLink = document.querySelectorAll("div.f_left.paginator > a");
-            let pages = Number(pagesLink[pagesLink.length - 1].text)
+            let pages = pagesLink.length > 0 ? Number(pagesLink[pagesLink.length - 1].text) : 1
             document.dispose()
             return {
                 comics: comics,
