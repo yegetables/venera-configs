@@ -1,7 +1,10 @@
 /** @type {import('./_venera_.js')} */
 
-const JCOMIC_BASE = "https://jcomic.net";
-const JCOMIC_REFERER = JCOMIC_BASE + "/";
+// ===== 镜像站配置：要换镜像站只改这两行 =====
+// 站点域名（不带协议）。也可以在 App 的源设置「站点域名」里覆盖，无需改代码。
+const JCOMIC_DOMAIN = "jcomic.net";
+// 图片 CDN 主机名。留空 => 自动按 "images." + 站点域名 推导。
+const JCOMIC_IMAGE_HOST = "";
 
 function trimTitle(raw) {
   if (!raw) return "";
@@ -32,6 +35,28 @@ function parseEpIdFromHref(href) {
     return decodeURIComponent(parts[2]);
   }
   return null;
+}
+
+/**
+ * 解码章节页图片的真实 URL。
+ * 站点改版后 img 的真实地址不在 src 里，而是编码在 data-locked 属性:
+ *   data-locked = "JCOMIC_TRAPS_" + 反转(base64(真实URL))
+ * 解码步骤: 去掉前缀 -> 反转 -> 补齐 base64 padding -> base64 解码。
+ * @param {string} locked - data-locked 属性值
+ * @returns {string} 真实图片 URL，失败返回 ""
+ */
+function decodeLockedImageUrl(locked) {
+  if (!locked || typeof locked !== "string") return "";
+  const m = /^JCOMIC_TRAPS?_(.*)$/.exec(locked);
+  if (!m) return "";
+  try {
+    let s = m[1].split("").reverse().join("").replace(/=/g, "")
+      .replace(/-/g, "+").replace(/_/g, "/");
+    s += "=".repeat((4 - (s.length % 4)) % 4);
+    return Convert.decodeUtf8(Convert.decodeBase64(s));
+  } catch (e) {
+    return "";
+  }
 }
 
 /**
@@ -126,7 +151,7 @@ class JComic extends ComicSource {
   name = "jcomic.net";
   key = "jcomic";
 
-  version = "1.0.0";
+  version = "1.0.2";
   minAppVersion = "1.4.6";
 
   url =
@@ -134,16 +159,66 @@ class JComic extends ComicSource {
 
   currentComic = null;
 
+  // —— 站点与图片地址一律由顶部 JCOMIC_DOMAIN / JCOMIC_IMAGE_HOST（可被源设置覆盖）推导 ——
+  //    不要在别处写死地址，换镜像站时只改顶部配置。
+  get _domain() {
+    const raw = this.loadSetting("domain");
+    const d = String(raw == null ? "" : raw)
+      .trim()
+      .replace(/^https?:\/\//i, "")
+      .replace(/\/+$/, "");
+    return d || JCOMIC_DOMAIN;
+  }
+
+  get _base() {
+    return "https://" + this._domain;
+  }
+
+  get _referer() {
+    return this._base + "/";
+  }
+
+  // 图片主机：默认跟随站点域名（images.<域名>），可用顶部常量覆盖
+  get _imageHost() {
+    return JCOMIC_IMAGE_HOST || "images." + this._domain;
+  }
+
+  // 把站点返回的图片地址改写到当前配置的图片主机（保留路径与查询串）。
+  // 默认配置下与站点原地址一致，等于直通；换镜像站时图片自动跟随。
+  _toImageUrl(url) {
+    if (!url) return "";
+    const m = /^(?:https?:)?\/\/[^\/]+(\/[\s\S]*)$/.exec(url);
+    if (m) return "https://" + this._imageHost + m[1];
+    if (url.startsWith("/")) return "https://" + this._imageHost + url;
+    return url;
+  }
+
   _buildUrl(path) {
     if (path.startsWith("http://") || path.startsWith("https://")) return path;
     if (!path.startsWith("/")) path = "/" + path;
-    return JCOMIC_BASE + path;
+    return this._base + path;
+  }
+
+  get settings() {
+    return {
+      domain: {
+        title: "Site domain",
+        type: "input",
+        default: JCOMIC_DOMAIN,
+        validator: String.raw`^(?!:\/\/)(?=.{1,253})([a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$`,
+      },
+    };
   }
 
   /**
    * [Optional] init
    */
-  init() {}
+  init() {
+    // 让「打开链接」识别跟随配置的域名（含镜像站）
+    const d = this._domain;
+    const domains = this.comic && this.comic.link && this.comic.link.domains;
+    if (domains && !domains.includes(d)) domains.push(d);
+  }
 
   /// explore
   explore = [
@@ -157,7 +232,7 @@ class JComic extends ComicSource {
         const path = page === 1 ? `/cat/${encoded}` : `/cat/${encoded}/${page}`;
         const url = this._buildUrl(path);
 
-        const resp = await Network.get(url, { referer: JCOMIC_REFERER });
+        const resp = await Network.get(url, { referer: this._referer });
         if (resp.status !== 200) throw new Error(resp.status);
 
         const doc = new HtmlDocument(resp.body);
@@ -274,7 +349,7 @@ class JComic extends ComicSource {
       const path = page === 1 ? `/cat/${encoded}` : `/cat/${encoded}/${page}`;
       const url = this._buildUrl(path);
 
-      const resp = await Network.get(url, { referer: JCOMIC_REFERER });
+      const resp = await Network.get(url, { referer: this._referer });
       if (resp.status !== 200) throw new Error(resp.status);
 
       const doc = new HtmlDocument(resp.body);
@@ -304,7 +379,7 @@ class JComic extends ComicSource {
       const path = page === 1 ? `/search/${encoded}` : `/search/${encoded}/${page}`;
       const url = this._buildUrl(path);
 
-      const resp = await Network.get(url, { referer: JCOMIC_REFERER });
+      const resp = await Network.get(url, { referer: this._referer });
       if (resp.status !== 200) throw new Error(resp.status);
 
       const doc = new HtmlDocument(resp.body);
@@ -335,7 +410,7 @@ class JComic extends ComicSource {
     loadInfo: async (id) => {
       const encodedId = encodeURI(id);
       const url = this._buildUrl(`/eps/${encodedId}`);
-      const resp = await Network.get(url, { referer: JCOMIC_REFERER });
+      const resp = await Network.get(url, { referer: this._referer });
       if (resp.status !== 200) throw new Error(resp.status);
 
       const doc = new HtmlDocument(resp.body);
@@ -445,32 +520,41 @@ class JComic extends ComicSource {
         // epId 里可能有 11.5、14.2 等，直接当原始字符串 encode 一下
         path += "/" + encodeURIComponent(epId);
       }
-      const url = JCOMIC_BASE + path;
+      const url = this._buildUrl(path);
 
-      const resp = await Network.get(url, { referer: JCOMIC_REFERER });
+      const resp = await Network.get(url, { referer: this._referer });
       if (resp.status !== 200) throw new Error(resp.status);
 
       const doc = new HtmlDocument(resp.body);
       const imgs = doc.querySelectorAll("img.comic-thumb");
-      const images = Array.from(imgs).map((img) => img.attributes["src"]);
+      const images = [];
+      imgs.forEach((img) => {
+        const attrs = img.attributes;
+        images.push(
+          this._toImageUrl(
+            decodeLockedImageUrl(attrs["data-locked"]) || attrs["src"] || ""
+          )
+        );
+      });
+      doc.dispose();
 
-      return { images };
+      return { images: images.filter(Boolean) };
     },
 
     onImageLoad: (url, comicId, epId) => {
       return {
-        url,
+        url: this._toImageUrl(url),
         headers: {
-          referer: JCOMIC_REFERER,
+          referer: this._referer,
         },
       };
     },
 
     onThumbnailLoad: (url) => {
       return {
-        url,
+        url: this._toImageUrl(url),
         headers: {
-          referer: JCOMIC_REFERER,
+          referer: this._referer,
         },
       };
     },
@@ -487,13 +571,23 @@ class JComic extends ComicSource {
     },
 
     link: {
-      domains: ["jcomic.net"],
+      domains: [JCOMIC_DOMAIN],
       linkToId: (url) => {
-        const reg = /https?:\/\/jcomic\.net\/(?:eps|page)\/([^\/?#]+)(?:\/[^\/?#]+)?/;
+        // 主机名不写死，换镜像站后同样能识别
+        const reg = /https?:\/\/[^\/]+\/(?:eps|page)\/([^\/?#]+)(?:\/[^\/?#]+)?/;
         const m = reg.exec(url);
         if (!m) throw new Error("Invalid jcomic url");
         return decodeURIComponent(m[1]);
       },
+    },
+  };
+
+  translation = {
+    zh_CN: {
+      "Site domain": "站点域名",
+    },
+    zh_TW: {
+      "Site domain": "站點域名",
     },
   };
 }
