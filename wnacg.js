@@ -7,7 +7,7 @@ class Wnacg extends ComicSource {
     // unique id of the source
     key = "wnacg"
 
-    version = "1.0.8"
+    version = "1.0.9"
 
     minAppVersion = "1.0.0"
 
@@ -689,7 +689,10 @@ class Wnacg extends ComicSource {
                             chapters.set(chapter.attributes["data-chid"], chapter.text.trim())
                         }
                         for (let link of document.querySelectorAll("div.f_left.paginator a[href]")) {
-                            let match = link.attributes["href"].match(/-page-(\d+)-/)
+                            // 分页链接形如 /photos-index-aid-<id>-page-<N>.html，
+                            // 数字后面没有短横线，所以不能用 /-page-(\d+)-/（会匹配失败、maxPage 恒为 1，
+                            // 导致只收到第 1 页 12 话，后续目录丢失）
+                            let match = link.attributes["href"].match(/-page-(\d+)/)
                             if (match) maxPage = Math.max(maxPage, Number(match[1]))
                         }
                         if (page >= maxPage) break
