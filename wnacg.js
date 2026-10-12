@@ -7,7 +7,7 @@ class Wnacg extends ComicSource {
     // unique id of the source
     key = "wnacg"
 
-    version = "1.1.0"
+    version = "1.1.1"
 
     minAppVersion = "1.0.0"
 
@@ -246,7 +246,7 @@ class Wnacg extends ComicSource {
         parts: [
             {
                 // title of the part
-                name: "最新",
+                name: "更新",
 
                 // fixed or random
                 // if random, need to provide `randomNumber` field, which indicates the number of comics to display at the same time
@@ -255,7 +255,7 @@ class Wnacg extends ComicSource {
                 // number of comics to display at the same time
                 // randomNumber: 5,
 
-                categories: ["最新"],
+                categories: ["更新"],
 
                 // category or search
                 // if `category`, use categoryComics.load to load comics
