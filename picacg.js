@@ -3,13 +3,16 @@ class Picacg extends ComicSource {
 
     key = "picacg"
 
-    version = "1.1.0"
+    version = "1.1.1"
 
     minAppVersion = "1.0.0"
 
     url = "https://cdn.jsdelivr.net/gh/venera-app/venera-configs@main/picacg.js"
 
     static defaultApiUrl = "https://picaapi.picacomic.com"
+
+    /// 榜单接口固定返回 40 条且不支持翻页，源里按这个条数在客户端切页
+    static leaderboardPageSize = 8
 
     apiKey = "C69BAF41DA5ABD1FFEDC6D2FEA56B";
 
@@ -128,6 +131,19 @@ class Picacg extends ComicSource {
         return data.comics.map((c) => this.parseComic(c))
     }
 
+    /// 榜单分页：接口一次给全，源里按 leaderboardPageSize 切片，
+    /// 这样"查看更多"能一直翻到底，又不会用 page>1 去撞接口的 400
+    async _loadLeaderboardPage(tt, page) {
+        const all = await this._loadLeaderboard(tt)
+        const size = Picacg.leaderboardPageSize
+        const current = page || 1
+        const start = (current - 1) * size
+        return {
+            comics: all.slice(start, start + size),
+            maxPage: Math.max(1, Math.ceil(all.length / size)),
+        }
+    }
+
     /// 最近更新第一页
     async _loadLatest() {
         const data = await this._getData('comics?page=1&s=dd')
@@ -175,11 +191,11 @@ class Picacg extends ComicSource {
                 ])
 
                 const parts = []
-                // 榜单: 整块显示(接口固定一页)
+                // 榜单: 与其它板块一致只展示前 leaderboardPageSize 部，其余去"查看更多"翻
                 boards.forEach((b, i) => {
                     parts.push({
                         title: b.title,
-                        comics: leaderboards[i],
+                        comics: leaderboards[i].slice(0, Picacg.leaderboardPageSize),
                         viewMore: {
                             page: "category",
                             attributes: {
@@ -276,15 +292,15 @@ class Picacg extends ComicSource {
         load: async (category, param, options, page) => {
             const sort = (options && options[0]) || 'dd'
             // param 是 sentinel 时走专用查询（供探索页多板块的"查看更多"跳转）：
-            //   leaderboard:XX -> 榜单接口（固定一页，不分页）
+            //   leaderboard:XX -> 榜单（接口一次给全，源里按 8 条切片翻页）
             //   latest         -> 全站最近更新（可分页）
             // 其余情况 param 是查询字段名（默认 c，即按分类查）
             const isLeaderboard = !!param && param.indexOf('leaderboard:') === 0
             if (isLeaderboard) {
-                const comics = await this._loadLeaderboard(
-                    param.slice('leaderboard:'.length)
+                return await this._loadLeaderboardPage(
+                    param.slice('leaderboard:'.length),
+                    page
                 )
-                return { comics: comics, maxPage: 1 }
             }
             const path =
                 param === 'latest'
@@ -332,10 +348,7 @@ class Picacg extends ComicSource {
                 "D30-Month",
             ],
             load: async (option, page) => {
-                return {
-                    comics: await this._loadLeaderboard(option),
-                    maxPage: 1,
-                }
+                return await this._loadLeaderboardPage(option, page)
             }
         }
     }
