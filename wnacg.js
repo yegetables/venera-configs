@@ -7,7 +7,7 @@ class Wnacg extends ComicSource {
     // unique id of the source
     key = "wnacg"
 
-    version = "1.0.9"
+    version = "1.0.10"
 
     minAppVersion = "1.0.0"
 
@@ -279,7 +279,7 @@ class Wnacg extends ComicSource {
                 // number of comics to display at the same time
                 // randomNumber: 5,
 
-                categories: ["同人誌", "漢化", "日語", "English", "CG畫集", "3D漫畫", "寫真Cosplay"],
+                categories: ["同人誌", "漢化", "日語", "English", "CG畫集", "AI圖集", "3D漫畫", "Cosplay"],
 
                 // category or search
                 // if `category`, use categoryComics.load to load comics
@@ -293,6 +293,7 @@ class Wnacg extends ComicSource {
                     "/albums-index-cate-12.html",
                     "/albums-index-cate-16.html",
                     "/albums-index-cate-2.html",
+                    "/albums-index-cate-37.html",
                     "/albums-index-cate-22.html",
                     "/albums-index-cate-3.html",
                 ],
@@ -331,7 +332,7 @@ class Wnacg extends ComicSource {
             },
             {
                 // title of the part
-                name: "雜誌短篇",
+                name: "雜誌&短篇",
 
                 // fixed or random
                 // if random, need to provide `randomNumber` field, which indicates the number of comics to display at the same time
@@ -340,7 +341,7 @@ class Wnacg extends ComicSource {
                 // number of comics to display at the same time
                 // randomNumber: 5,
 
-                categories: ["雜誌短篇", "漢化", "日語", "English",],
+                categories: ["雜誌&短篇", "漢化", "日語", "English",],
 
                 // category or search
                 // if `category`, use categoryComics.load to load comics
@@ -369,7 +370,7 @@ class Wnacg extends ComicSource {
                 // number of comics to display at the same time
                 // randomNumber: 5,
 
-                categories: ["韓漫", "漢化", "生肉",],
+                categories: ["韓漫", "合集", "漢化", "其他",],
 
                 // category or search
                 // if `category`, use categoryComics.load to load comics
@@ -379,6 +380,7 @@ class Wnacg extends ComicSource {
                 // [Optional] {string[]?} must have same length as categories, used to provide loading param for each category
                 categoryParams: [
                     "/albums-index-cate-19.html",
+                    "/albums-index-cate-38.html",
                     "/albums-index-cate-20.html",
                     "/albums-index-cate-21.html",
                 ],
