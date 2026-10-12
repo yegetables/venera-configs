@@ -7,7 +7,7 @@ class Wnacg extends ComicSource {
     // unique id of the source
     key = "wnacg"
 
-    version = "1.0.7"
+    version = "1.0.8"
 
     minAppVersion = "1.0.0"
 
@@ -402,6 +402,13 @@ class Wnacg extends ComicSource {
          * @returns {Promise<{comics: Comic[], maxPage: number}>}
          */
         load: async (category, param, options, page) => {
+            // 排序: 站点用 cookie Mpic_sortset_album 控制(见 common.js 的 sort_setting)，
+            // 值取自 optionList 的 key(ct_asc / ut_desc / p_desc)，需在请求前设置。
+            if (options && options[0]) {
+                Network.setCookies(this.baseUrl, [
+                    new Cookie({ name: "Mpic_sortset_album", value: options[0] }),
+                ])
+            }
             let url = this.baseUrl + param
             if (page !== 0) {
                 if (!url.includes("-")) {
@@ -431,6 +438,17 @@ class Wnacg extends ComicSource {
                 maxPage: pages,
             }
         },
+        // 排序选项(站点通过 cookie Mpic_sortset_album 实现)
+        optionList: [
+            {
+                label: "Sort",
+                options: [
+                    "ct_asc-創建時間",
+                    "ut_desc-上傳時間",
+                    "p_desc-圖片數",
+                ],
+            },
+        ],
         ranking: {
             options: [
                 "day-Day",
@@ -811,6 +829,10 @@ class Wnacg extends ComicSource {
             'Custom Domain': '自定义域名',
             'Custom domain is not set': '未设置自定义域名',
             'Selected domain is unavailable': '所选域名不可用，请先刷新域名列表',
+            'Sort': '排序',
+            '創建時間': '创建时间',
+            '上傳時間': '上传时间',
+            '圖片數': '图片数',
             'Day': '日',
             'Week': '周',
             'Month': '月',
@@ -823,6 +845,7 @@ class Wnacg extends ComicSource {
             'Custom Domain': '自定義域名',
             'Custom domain is not set': '未設置自定義域名',
             'Selected domain is unavailable': '所選域名不可用，請先刷新域名列表',
+            'Sort': '排序',
             'Day': '日',
             'Week': '周',
             'Month': '月',
