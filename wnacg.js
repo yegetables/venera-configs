@@ -7,7 +7,7 @@ class Wnacg extends ComicSource {
     // unique id of the source
     key = "wnacg"
 
-    version = "1.0.10"
+    version = "1.0.11"
 
     minAppVersion = "1.0.0"
 
@@ -456,6 +456,7 @@ class Wnacg extends ComicSource {
                 "day-Day",
                 "week-Week",
                 "month-Month",
+                "year-Year",
             ],
             load: async (option, page) => {
                 let url = `${this.baseUrl}/albums-favorite_ranking-type-${option}.html`
@@ -841,6 +842,7 @@ class Wnacg extends ComicSource {
             'Day': '日',
             'Week': '周',
             'Month': '月',
+            'Year': '年',
         },
         'zh_TW': {
             'Refresh Domain List': '刷新域名列表',
@@ -854,6 +856,7 @@ class Wnacg extends ComicSource {
             'Day': '日',
             'Week': '周',
             'Month': '月',
+            'Year': '年',
         },
     }
 }
