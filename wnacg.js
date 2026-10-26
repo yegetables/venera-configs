@@ -7,7 +7,7 @@ class Wnacg extends ComicSource {
     // unique id of the source
     key = "wnacg"
 
-    version = "1.1.1"
+    version = "1.2.0"
 
     minAppVersion = "1.0.0"
 
@@ -16,9 +16,18 @@ class Wnacg extends ComicSource {
 
     static domains = [];
 
+    // 官网（不随发布页刷新变化，作为镜像站失效时的兜底）
+    static officialDomain = "www.wnacg.com"
+
     get baseUrl() {
         let selection = this.loadSetting('domainSelection')
         if (selection === undefined || selection === null) selection = 0
+
+        // 'official' 必须先于 parseInt 判断，否则会变成 NaN 落进镜像站分支
+        if (selection === 'official') {
+            return `https://${Wnacg.officialDomain}`
+        }
+
         selection = parseInt(selection)
 
         if (selection === 0) {
@@ -814,8 +823,11 @@ class Wnacg extends ComicSource {
     }
 
     get settings() {
-        // 动态生成选项，总是保留 Custom Domain (0)，然后根据 Wnacg.domains 数量添加选项
-        let domainOptions = [{ value: '0', text: 'Custom Domain' }]
+        // 动态生成选项，总是保留 Custom Domain (0) 与官网，然后根据 Wnacg.domains 数量添加镜像站
+        let domainOptions = [
+            { value: '0', text: 'Custom Domain' },
+            { value: 'official', text: 'Official' },
+        ]
         for (let i = 0; i < Wnacg.domains.length; i++) {
             domainOptions.push({
                 value: String(i + 1),
@@ -857,6 +869,7 @@ class Wnacg extends ComicSource {
             'Refresh Domain List on Startup': '启动时刷新域名列表',
             'Domain Selection': '域名选择',
             'Custom Domain': '自定义域名',
+            'Official': '官网',
             'Custom domain is not set': '未设置自定义域名',
             'Selected domain is unavailable': '所选域名不可用，请先刷新域名列表',
             'Sort': '排序',
@@ -874,6 +887,7 @@ class Wnacg extends ComicSource {
             'Refresh Domain List on Startup': '啟動時刷新域名列表',
             'Domain Selection': '域名選擇',
             'Custom Domain': '自定義域名',
+            'Official': '官網',
             'Custom domain is not set': '未設置自定義域名',
             'Selected domain is unavailable': '所選域名不可用，請先刷新域名列表',
             'Sort': '排序',
