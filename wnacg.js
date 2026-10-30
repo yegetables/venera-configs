@@ -7,7 +7,7 @@ class Wnacg extends ComicSource {
     // unique id of the source
     key = "wnacg"
 
-    version = "1.2.1"
+    version = "1.2.2"
 
     minAppVersion = "1.0.0"
 
@@ -185,13 +185,26 @@ class Wnacg extends ComicSource {
     }
 
     parseComic(c) {
-        let link = c.querySelector("div.pic_box > a").attributes["href"];
+        // 桌面模板和移动模板的卡片结构不同（移动 UA 会被站点换成另一套 DOM），两种都认
+        let linkEl = c.querySelector("div.pic_box > a")
+            || c.querySelector("a.ImgA")
+            || c.querySelector("div.itemImg > a")
+        let link = linkEl.attributes["href"];
         let id = RegExp("(?<=-aid-)[0-9]+").exec(link)[0];
-        let image =
-            c.querySelector("div.pic_box > a > img").attributes["src"];
+        let imageEl = c.querySelector("div.pic_box > a > img")
+            || c.querySelector("a.ImgA > img")
+            || c.querySelector("div.itemImg > a > img")
+        let image = imageEl.attributes["src"];
         image = `https:${image}`;
-        let name = c.querySelector("div.info > div.title > a").text;
-        let info = c.querySelector("div.info > div.info_col").text.trim();
+        let nameEl = c.querySelector("div.info > div.title > a")
+            || c.querySelector("a.txtA")
+            || c.querySelector("div.itemTxt > a.title")
+            || c.querySelector("a.ImgA > span")
+        let name = nameEl.text;
+        let infoEl = c.querySelector("div.info > div.info_col")
+            || c.querySelector("span.info")
+            || c.querySelector("span.pd")
+        let info = infoEl ? infoEl.text.trim() : "";
         info = info.replaceAll('\n', '');
         info = info.replaceAll('\t', '');
         return new Comic({
@@ -200,6 +213,70 @@ class Wnacg extends ComicSource {
             cover: image,
             description: info,
         })
+    }
+
+    // 移动模板详情页（站点对移动 UA 返回 #comicName/#Cover/dv-* 那套 DOM）
+    parseMobileComicInfo(document) {
+        let titleEl = document.querySelector("#comicName")
+        let coverEl = document.querySelector("#Cover img")
+        if (!titleEl || !coverEl) {
+            throw "Invalid Page"
+        }
+        let cover = 'https:' + coverEl.attributes["src"]
+        cover = cover.substring(0, 6) + cover.substring(8)
+        let isSeries = document.querySelector("#dv-ch-list") !== null
+        let dateEl = document.querySelector("span.date")
+        let countText = dateEl ? dateEl.text.split('·')[0].trim() : ''
+        if (!isSeries) countText = countText.replace(/P$/i, '')
+        let tags = new Map()
+        tags.set(isSeries ? "章節" : "頁數", [countText])
+        for (let a of document.querySelectorAll("div.sub_r a[href]")) {
+            if (a.attributes["href"].includes("/albums-index-cate")) {
+                tags.set("分類", [a.text])
+                break
+            }
+        }
+        let tagEls = document.querySelectorAll("a.dv-tag")
+        if (tagEls.length > 0) {
+            tags.set("標籤", tagEls.map((e) => e.text))
+        }
+        let descEl = document.querySelector("div.dv-desc-text")
+        let description = descEl ? descEl.text.trim() : ""
+        if (description === "暫無簡介") description = ""
+        let uploaderEl = document.querySelector("a.introName")
+        return {
+            title: titleEl.text,
+            cover: cover,
+            isSeries: isSeries,
+            tags: tags,
+            description: description,
+            uploader: uploaderEl ? uploaderEl.text : "",
+        }
+    }
+
+    // 移动模板的合集目录由 ctl=photos&act=chapters 返回 JSON，每页 12 话
+    async loadMobileChapters(id) {
+        let chapters = new Map()
+        let total = 0
+        let page = 1
+        while (true) {
+            let res = await Network.get(`${this.baseUrl}/?ctl=photos&act=chapters&sid=${id}&page=${page}&order=asc`, Wnacg.desktopHeaders)
+            if (res.status !== 200) {
+                throw `Invalid Status Code ${res.status}`
+            }
+            let data = JSON.parse(res.body)
+            if (!data || data.code !== 0 || !data.list) {
+                throw 'Invalid chapter directory'
+            }
+            for (let c of data.list) {
+                chapters.set(String(c.id), c.name)
+            }
+            if (data.total) total = Number(data.total)
+            if (data.ended || chapters.size >= total || !data.list || data.list.length === 0) break
+            page++
+        }
+        if (chapters.size === 0) throw 'Invalid chapter directory'
+        return chapters
     }
 
     // explore page list
@@ -226,26 +303,49 @@ class Wnacg extends ComicSource {
                     throw `Invalid Status Code ${res.status}`
                 }
                 let document = new HtmlDocument(res.body)
+                let result = []
                 let titleBlocks = document.querySelectorAll("div.title_sort");
                 let comicBlocks = document.querySelectorAll("div.bodywrap");
-                if (titleBlocks.length === 0 || titleBlocks.length !== comicBlocks.length) {
-                    throw "Invalid Page"
-                }
-                let result = []
-                for (let i = 0; i < titleBlocks.length; i++) {
-                    let title = titleBlocks[i].querySelector("div.title_h2").text.replaceAll(/\s+/g, '')
-                    let link = titleBlocks[i].querySelector("div.r > a").attributes["href"]
-                    let comics = []
-                    let comicBlock = comicBlocks[i]
-                    let comicElements = comicBlock.querySelectorAll("div.gallary_wrap > ul.cc > li")
-                    for (let comicElement of comicElements) {
-                        comics.push(this.parseComic(comicElement))
+                if (titleBlocks.length > 0 && titleBlocks.length === comicBlocks.length) {
+                    // 桌面模板
+                    for (let i = 0; i < titleBlocks.length; i++) {
+                        let title = titleBlocks[i].querySelector("div.title_h2").text.replaceAll(/\s+/g, '')
+                        let link = titleBlocks[i].querySelector("div.r > a").attributes["href"]
+                        let comics = []
+                        let comicBlock = comicBlocks[i]
+                        let comicElements = comicBlock.querySelectorAll("div.gallary_wrap > ul.cc > li")
+                        for (let comicElement of comicElements) {
+                            comics.push(this.parseComic(comicElement))
+                        }
+                        result.push({
+                            title: title,
+                            comics: comics,
+                            viewMore: `category:${title}@${link}`
+                        })
                     }
-                    result.push({
-                        title: title,
-                        comics: comics,
-                        viewMore: `category:${title}@${link}`
-                    })
+                } else {
+                    // 移动模板：每个 div.imgBox 是一个版块
+                    for (let box of document.querySelectorAll("div.imgBox")) {
+                        let header = box.querySelector("div.Sub_H2")
+                        let titleEl = header ? header.querySelector("span.Title") : null
+                        if (!titleEl) continue
+                        let title = titleEl.text.replaceAll(/\s+/g, '')
+                        let more = header.querySelector("a[href]")
+                        let link = more ? more.attributes["href"] : null
+                        if (link && !link.startsWith("/") && !link.startsWith("http")) {
+                            link = "/" + link
+                        }
+                        let comics = box.querySelectorAll("ul.col_3_2 > li").map((e) => this.parseComic(e))
+                        if (comics.length === 0) continue
+                        result.push({
+                            title: title,
+                            comics: comics,
+                            viewMore: link ? `category:${title}@${link}` : null
+                        })
+                    }
+                    if (result.length === 0) {
+                        throw "Invalid Page"
+                    }
                 }
                 document.dispose()
                 return result
@@ -448,7 +548,7 @@ class Wnacg extends ComicSource {
                     ? `${this.baseUrl}/albums-favorite_ranking-page-${page}-type-${type}.html`
                     : `${this.baseUrl}/albums-favorite_ranking-type-${type}-cate.html`
             } else {
-                url = this.baseUrl + param
+                url = this.baseUrl + (param.startsWith("/") ? param : "/" + param)
                 if (page !== 0) {
                     if (!url.includes("-")) {
                         url = url.replaceAll(".html", "-.html");
@@ -466,12 +566,25 @@ class Wnacg extends ComicSource {
             }
             let document = new HtmlDocument(res.body)
             let comicElements = document.querySelectorAll("div.grid div.gallary_wrap > ul.cc > li")
+            if (comicElements.length === 0) {
+                // 移动模板：分类/搜索是 ul.col_2，排行榜是 div.itemBox
+                comicElements = document.querySelectorAll("ul.col_2 > li")
+                if (comicElements.length === 0) {
+                    comicElements = document.querySelectorAll("div.itemBox")
+                }
+            }
             let comics = []
             for (let comicElement of comicElements) {
                 comics.push(this.parseComic(comicElement))
             }
             let pagesLink = document.querySelectorAll("div.f_left.paginator > a");
             let pages = pagesLink.length > 0 ? Number(pagesLink[pagesLink.length - 1].text) : 1
+            if (pagesLink.length === 0) {
+                for (let link of document.querySelectorAll("div.block-pagination a[href]")) {
+                    let match = link.attributes["href"].match(/-page-(\d+)/)
+                    if (match) pages = Math.max(pages, Number(match[1]))
+                }
+            }
             document.dispose()
             return {
                 comics: comics,
@@ -509,6 +622,9 @@ class Wnacg extends ComicSource {
 
                 let document = new HtmlDocument(res.body)
                 let comicElements = document.querySelectorAll("div.grid div.gallary_wrap > ul.cc > li")
+                if (comicElements.length === 0) {
+                    comicElements = document.querySelectorAll("div.itemBox")
+                }
                 let comics = []
                 for (let comicElement of comicElements) {
                     comics.push(this.parseComic(comicElement))
@@ -518,6 +634,11 @@ class Wnacg extends ComicSource {
                 let pages = 1
                 if (pagesLink.length > 0) {
                     pages = Number(pagesLink[pagesLink.length - 1].text)
+                } else {
+                    for (let link of document.querySelectorAll("div.block-pagination a[href]")) {
+                        let match = link.attributes["href"].match(/-page-(\d+)/)
+                        if (match) pages = Math.max(pages, Number(match[1]))
+                    }
                 }
 
                 document.dispose()
@@ -549,13 +670,26 @@ class Wnacg extends ComicSource {
             }
             let document = new HtmlDocument(res.body)
             let comicElements = document.querySelectorAll("div.grid div.gallary_wrap > ul.cc > li")
+            if (comicElements.length === 0) {
+                comicElements = document.querySelectorAll("ul.col_2 > li")
+            }
             let comics = []
             for (let comicElement of comicElements) {
                 comics.push(this.parseComic(comicElement))
             }
-            let total = document.querySelectorAll("p.result > b")[0].text.replaceAll(',', '')
-            const comicsPerPage = 24
-            let pages = Math.ceil(Number(total) / comicsPerPage)
+            let pages
+            let totalEl = document.querySelectorAll("p.result > b")
+            if (totalEl.length > 0) {
+                let total = totalEl[0].text.replaceAll(',', '')
+                pages = Math.ceil(Number(total) / 24)
+            } else {
+                // 移动模板没有总数，用分页链接里的 p=N 推
+                pages = 1
+                for (let link of document.querySelectorAll("div.f_left.paginator a[href]")) {
+                    let match = link.attributes["href"].match(/[?&]p=(\d+)/)
+                    if (match) pages = Math.max(pages, Number(match[1]))
+                }
+            }
             document.dispose()
             return {
                 comics: comics,
@@ -702,6 +836,23 @@ class Wnacg extends ComicSource {
                 throw `Invalid Status Code ${res.status}`
             }
             let document = new HtmlDocument(res.body)
+            if (!document.querySelector("div.userwrap > h2")) {
+                let info = this.parseMobileComicInfo(document)
+                document.dispose()
+                let chapters
+                if (info.isSeries) {
+                    chapters = await this.loadMobileChapters(id)
+                }
+                return new ComicDetails({
+                    id: id,
+                    title: info.title,
+                    cover: info.cover,
+                    chapters: chapters,
+                    tags: info.tags,
+                    description: info.description,
+                    uploader: info.uploader,
+                })
+            }
             let title = document.querySelector("div.userwrap > h2").text
             let cover = document.querySelector("div.userwrap > div.asTB > div.asTBcell.uwthumb > img").attributes["src"]
             cover = 'https:' + cover
@@ -777,7 +928,7 @@ class Wnacg extends ComicSource {
                 throw `Invalid Status Code ${res.status}`
             }
             let document = new HtmlDocument(res.body)
-            if (document.querySelector("#sr_pub")) {
+            if (document.querySelector("#sr_pub") || document.querySelector("#Cover")) {
                 document.dispose()
                 return { thumbnails: [], next: null }
             }
